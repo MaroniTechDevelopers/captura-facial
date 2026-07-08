@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Captura Facial — Grupo Maroni</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f0f2f5;min-height:100vh;color:#111827;-webkit-font-smoothing:antialiased}
+.hidden{display:none !important}
+
+/* ── APP BAR (idêntica ao app de Treinamentos G&D) ── */
+.app-bar{background:#111827;height:58px;padding:0 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;border-bottom:1px solid rgba(245,200,0,.15)}
+.app-bar-left{display:flex;align-items:center;gap:9px}
+.app-bar-title{font-size:.88rem;font-weight:700;color:#f5c800;letter-spacing:.01em}
+.gear{background:none;border:none;cursor:pointer;padding:5px 8px;border-radius:6px;font-size:1.05rem;color:rgba(255,255,255,.5);transition:color .15s,background .15s}
+.gear:hover{background:rgba(255,255,255,.1)}
+.gear.ok{color:#4ade80}
+
+/* ── HEADER DE MARCA (mesmo bloco do login do app de Treinamentos) ── */
+.brand{background:#111827;border-radius:14px;padding:16px 18px;margin-bottom:14px;display:flex;align-items:center;gap:12px}
+.brand-tag{font-size:.66rem;font-weight:700;letter-spacing:.14em;color:#f5c800;text-transform:uppercase;margin-bottom:2px}
+.brand-h{font-size:1rem;font-weight:800;color:#fff;line-height:1.2}
+.brand-sub{font-size:.71rem;color:rgba(255,255,255,.45);margin-top:2px;font-weight:500}
+
+.wrap{max-width:560px;margin:0 auto;padding:16px 14px 40px}
+.footer-brand{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:22px;opacity:.65}
+.footer-brand span{font-size:.66rem;font-weight:700;letter-spacing:.12em;color:#9ca3af;text-transform:uppercase}
+.card{background:#fff;border-radius:14px;padding:20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04)}
+.card-title{font-size:.93rem;font-weight:700;margin-bottom:16px;color:#111827;display:flex;align-items:center;justify-content:space-between}
+
+label{display:block;font-size:.76rem;font-weight:600;color:#374151;margin:12px 0 5px}
+input{width:100%;padding:11px 12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:.95rem;font-family:inherit;background:#fff}
+input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,0,.18)}
+.input-matricula{font-size:1.5rem;font-weight:700;text-align:center;letter-spacing:.12em;padding:14px}
+
+.btn{border:none;border-radius:10px;padding:12px 18px;font-size:.9rem;font-weight:700;font-family:inherit;cursor:pointer;transition:all .15s}
+.btn-yellow{background:#f5c800;color:#111827}
+.btn-yellow:hover{background:#e6ba00;box-shadow:0 2px 8px rgba(245,200,0,.35)}
+.btn-dark{background:#111827;color:#fff}
+.btn-dark:hover{background:#1f2937}
+.btn-outline{background:#fff;color:#374151;border:1.5px solid #e5e7eb}
+.btn-outline:hover{background:#f9fafb;border-color:#d1d5db}
+.btn-block{width:100%;margin-top:18px}
+.btn-sm{padding:7px 12px;font-size:.78rem;border-radius:8px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.dicas{background:#fffbe6;border:1px solid #f5e08a;border-radius:10px;padding:10px 12px;font-size:.76rem;color:#6b5900;margin-top:14px;line-height:1.55}
+
+/* ---------- histórico ---------- */
+.hist-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6}
+.hist-item:last-child{border-bottom:none}
+.hist-thumb{width:44px;height:58px;border-radius:8px;object-fit:cover;background:#e5e7eb;flex-shrink:0}
+.hist-info{flex:1;min-width:0}
+.hist-nome{font-size:.9rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hist-meta{font-size:.72rem;color:#6b7280;margin-top:2px}
+.chip{display:inline-block;font-size:.66rem;font-weight:700;padding:3px 8px;border-radius:12px;margin-top:4px}
+.chip-ok{background:#dcfce7;color:#15803d}
+.chip-env{background:#e0e7ff;color:#4338ca}
+.chip-erro{background:#fee2e2;color:#b91c1c}
+.hist-actions{display:flex;flex-direction:column;gap:5px;flex-shrink:0}
+.empty{font-size:.8rem;color:#9ca3af;text-align:center;padding:14px 0}
+
+/* ---------- câmera / preview (fullscreen) ---------- */
+.cam{position:fixed;inset:0;background:#000;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow-y:auto}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#video.espelho{transform:scaleX(-1)}
+.oval-mask{position:absolute;top:50%;left:50%;transform:translate(-50%,-56%);width:min(62vw,290px);aspect-ratio:3/4.1;border-radius:50%;border:3px dashed rgba(245,200,0,.9);box-shadow:0 0 0 200vmax rgba(0,0,0,.55);pointer-events:none}
+.cam-top{position:absolute;top:0;left:0;right:0;padding:16px;padding-top:calc(16px + env(safe-area-inset-top));background:linear-gradient(rgba(0,0,0,.7),transparent);color:#fff;font-size:.78rem;text-align:center;line-height:1.5;z-index:2}
+.cam-top b{color:#f5c800}
+.cam-controls{position:absolute;bottom:0;left:0;right:0;padding:22px;padding-bottom:calc(22px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:space-around;background:linear-gradient(transparent,rgba(0,0,0,.75));z-index:2}
+.cam-btn{background:rgba(255,255,255,.15);border:none;color:#fff;width:52px;height:52px;border-radius:50%;font-size:1.3rem;cursor:pointer}
+.shutter{width:76px;height:76px;border-radius:50%;background:#f5c800;border:5px solid #fff;font-size:1.6rem;cursor:pointer}
+.shutter:active{transform:scale(.93)}
+
+#prevImg{max-width:min(66vw,280px);max-height:48vh;border-radius:16px;border:3px solid #f5c800;object-fit:contain}
+.prev-matricula{color:#f5c800;font-weight:800;font-size:1.7rem;letter-spacing:.1em;margin-top:14px;text-align:center}
+.prev-matricula small{display:block;font-size:.68rem;font-weight:600;color:#d1d5db;letter-spacing:.02em;margin-bottom:2px}
+.badge-tamanho{display:inline-block;background:#dcfce7;color:#15803d;font-size:.74rem;font-weight:700;padding:5px 14px;border-radius:14px;margin-top:12px}
+.prev-check{color:#fff;font-size:.78rem;line-height:1.8;margin:12px 0 4px;text-align:left}
+.prev-botoes{display:flex;gap:12px;margin-top:16px;padding-bottom:20px}
+
+/* ---------- modal ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal{background:#fff;border-radius:16px;padding:22px;width:100%;max-width:440px;max-height:88vh;overflow-y:auto}
+.modal h3{font-size:1rem;margin-bottom:6px}
+.modal .sub{font-size:.76rem;color:#6b7280;line-height:1.5}
+.m-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+
+/* ---------- toast (idêntico ao app de Treinamentos G&D) ---------- */
+#toast{position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:12px 18px;border-radius:12px;font-size:.83rem;font-weight:500;opacity:0;transform:translateY(8px);transition:all .28s;z-index:999;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:88vw}
+#toast.show{opacity:1;transform:none}
+
+@media(min-width:600px){.oval-mask{width:250px}}
+@media(max-width:520px){#toast{right:12px;left:12px;bottom:16px}}
+</style>
+</head>
+<body>
+
+<div class="app-bar">
+  <div class="app-bar-left">
+    <img id="logoBar" alt="Grupo Maroni" style="height:30px;display:block">
+    <span class="app-bar-title">Captura Facial</span>
+  </div>
+  <button class="gear" id="gearBtn" onclick="abrirConfig()" title="Configurações">⚙️</button>
+</div>
+
+<div class="wrap">
+
+  <div class="brand">
+    <img id="logoBrand" alt="Grupo Maroni" style="height:44px;display:block;flex-shrink:0">
+    <div>
+      <div class="brand-tag">Grupo Maroni</div>
+      <div class="brand-h">Captura Facial</div>
+      <div class="brand-sub">Facilities · Controle de Acesso</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Nova captura</div>
+    <label>Matrícula do colaborador *</label>
+    <input id="matricula" class="input-matricula" inputmode="numeric" placeholder="0000" autocomplete="off">
+    <button class="btn btn-yellow btn-block" onclick="abrirCamera()">📷 Capturar foto</button>
+    <div class="dicas">
+      <b>Confira a matrícula com atenção</b> — o nome é puxado da base do RH por ela.<br><br>
+      <b>Padrão automático da foto:</b> 3x4 digital (354×472 px), JPG, no máximo <b>40 KB</b> —
+      o app ajusta sozinho antes de enviar.<br><br>
+      <b>Na hora de fotografar:</b> fundo claro e uniforme • rosto centralizado no oval •
+      boa iluminação • sem boné, óculos escuros ou máscara.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <span>Capturas realizadas <span id="histCount" style="color:#6b7280;font-weight:600"></span></span>
+      <button class="btn btn-outline btn-sm" id="btnExcel" onclick="abrirExcel()" style="display:none">📊 Planilha</button>
+    </div>
+    <div id="histList"><div class="empty">Nenhuma captura ainda.</div></div>
+  </div>
+
+  <div class="footer-brand">
+    <img id="logoFoot" alt="Grupo Maroni" style="height:20px;display:block">
+    <span>Grupo Maroni · Facilities</span>
+  </div>
+
+</div>
+
+<!-- ============ TELA DA CÂMERA ============ -->
+<div id="camScreen" class="cam hidden">
+  <video id="video" autoplay playsinline muted></video>
+  <div class="oval-mask"></div>
+  <div class="cam-top">Matrícula <b id="camMatricula"></b> — posicione o rosto dentro do oval<br>Fundo claro • Olhar para a câmera • Sem boné/óculos</div>
+  <div class="cam-controls">
+    <button class="cam-btn" onclick="fecharCamera()" title="Cancelar">✕</button>
+    <button class="shutter" id="btnShutter" onclick="capturar()" disabled title="Capturar">📷</button>
+    <button class="cam-btn" onclick="trocarCamera()" title="Trocar câmera">🔄</button>
+  </div>
+</div>
+
+<!-- ============ TELA DE PREVIEW ============ -->
+<div id="prevScreen" class="cam hidden">
+  <img id="prevImg" alt="Prévia da foto">
+  <div class="prev-matricula"><small>MATRÍCULA</small><span id="prevMatricula"></span></div>
+  <div class="badge-tamanho" id="prevTamanho"></div>
+  <div class="prev-check">
+    ✔️ A matrícula acima está correta?<br>
+    ✔️ Rosto nítido e centralizado, fundo claro?<br>
+    ✔️ Olhos abertos, sem boné/óculos?
+  </div>
+  <div class="prev-botoes">
+    <button class="btn btn-outline" onclick="repetir()">↩️ Repetir</button>
+    <button class="btn btn-yellow" id="btnConfirmar" onclick="confirmarEnvio()">✅ Confirmar e enviar</button>
+  </div>
+</div>
+
+<!-- ============ MODAL CONFIG ============ -->
+<div id="modalCfg" class="modal-bg hidden">
+  <div class="modal">
+    <h3>⚙️ Configurações</h3>
+    <p class="sub">URLs geradas no Power Automate e SharePoint. Ficam salvas apenas neste aparelho — use "Copiar link de configuração" para configurar o celular do outro operador em 1 toque.</p>
+    <label>URL do Fluxo (HTTP trigger do Power Automate) *</label>
+    <input id="cfgEndpoint" placeholder="https://prod-XX.brazilsouth.logic.azure.com/...">
+    <label>Link da planilha no SharePoint (opcional)</label>
+    <input id="cfgExcel" placeholder="https://transmaroni.sharepoint.com/...">
+    <div class="m-foot">
+      <button class="btn btn-outline btn-sm" onclick="copiarLinkConfig()">📲 Copiar link de configuração</button>
+      <button class="btn btn-outline btn-sm" onclick="testarConexao()">🔌 Testar conexão</button>
+      <button class="btn btn-outline btn-sm" onclick="fecharConfig()">Cancelar</button>
+      <button class="btn btn-dark btn-sm" onclick="salvarConfig()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="workCanvas" class="hidden"></canvas>
+<div id="toast"></div>
+
+<script>
+/* ==================== constantes / estado ==================== */
+const LIMITE_KB    = 40;                    // exigência do controle de acesso
+const LIMITE_BYTES = LIMITE_KB * 1024;
+const FOTO_W = 354, FOTO_H = 472;           // 3x4 digital (3cm×4cm em 300 dpi)
+const HIST_CAP = 150;                       // máx. de registros no histórico do aparelho
+
+const K_CFG  = 'facial_config_v1';
+const K_HIST = 'facial_hist_v1';
+const cfg    = () => JSON.parse(localStorage.getItem(K_CFG)  || '{}');
+const hist   = () => JSON.parse(localStorage.getItem(K_HIST) || '[]');
+const saveCfg  = c => localStorage.setItem(K_CFG,  JSON.stringify(c));
+
+// Grava o histórico com proteção contra estouro de quota do localStorage:
+// se não couber, descarta miniaturas e depois registros já enviados antigos
+// (nunca descarta registros com foto pendente de envio). Retorna true se persistiu.
+function saveHist(h){
+  try { localStorage.setItem(K_HIST, JSON.stringify(h)); return true; }
+  catch(e){
+    const clone = h.map(r => ({...r}));
+    // 1) tira as miniaturas dos ENVIADOS mais antigos (foto já está no SharePoint)
+    for(let i = clone.length - 1; i >= 0; i--){
+      if(clone[i].status === 'enviado' && clone[i].thumb){
+        delete clone[i].thumb;
+        try { localStorage.setItem(K_HIST, JSON.stringify(clone)); return true; } catch(_){}
+      }
+    }
+    // 2) remove ENVIADOS antigos, preservando pendentes (erro/enviando com payload)
+    const pendentes = clone.filter(r => r.status !== 'enviado');
+    const enviados  = clone.filter(r => r.status === 'enviado');  // índice 0 = mais novo
+    while(enviados.length){
+      enviados.pop();                         // descarta o enviado MAIS ANTIGO (fim do array)
+      try { localStorage.setItem(K_HIST, JSON.stringify([...pendentes, ...enviados])); return true; } catch(_){}
+    }
+    try { localStorage.setItem(K_HIST, JSON.stringify(pendentes)); return true; } catch(_){}
+    return false;                             // não coube nem só com os pendentes
+  }
+}
+
+// Logo do Grupo Maroni (mesmo asset do app de Treinamentos G&D)
+const _LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADcAAAA7CAYAAADfGRI9AAADxUlEQVR42u3abYgUdRzA8d9sd212HgV5RRrVFcZpDxpkUeBhLzToisI6RAkCPZKIK4IMi4gKzvJ60VUvghKE6AGl7IJ60dWBcVmClYJ6Hp6Ij6d4x6msck+6P78v5mD5cbe7/nfmZubYF59ll2Fm98vu/Oc/syPDZ+oFzQm3GGKNP9GEayvHJVTRcSdwZ8y95Bp3BBJzz5bjynHxU44rxwXgmuka9xR2Tbe4BeiEYnC6xM3GZmRzt5n0uCq8j4tQoyepcSmsQd8kUYo9SY1bBjUG8CTWQtGV1DgP+6G+P3EbBM9D0QlxdDOWRhLnWw1FBtUQXz0U7Y5hj+EkdkUZV4sxKFogvvlQ9OJVLEENpAivYRTqmzfVcTPwrhkhR1AHwS1QWP3Yjs/wgpnBzMQWqLFhquI8rMQxKKzfIaiAFmE3HsE8dENhHUUq7LiH8Te0gEYIBosMzGIImseisOLm4GtokY6jCgehJTiFjagL/Gdp96urtBH/OKw3hm14GhVhHOc8rMBRqKMxh2+uHzVhHsQfwl/QiCwtEHcDFuaYY5ancddEcRlkoRHqsEH2gxeI/wp3x/mK8wIIrDYsgUxiDRQ3xjnu+zz72kIIrEUYxgV4woMXk5iJrIf4bscgdJKf5aycwW/H+ICSiklIvsBKc0iZBXsB6g+o7/OkxCl2mtfXmriPzPLVSYrLNWzClkONByFR7HN70YxPoA76Ib46ZMzyEVRGFXceaQhaHNY/AkE1uqHG/3aGcmmKA9chBQ+HHNZ/Cz9AYW0ycSXN3HdAHXRjLX6CBugVG/cz1EEW92A0JoON4lEb9zbUwQAErTEJu4wqG1cPdXAQgpnogUasG2LjKnDOYWMXUQfB/RiKOO5bGzducwnHrRkQNEUc98ZkcYuhjjZBfN9EGNds43L9C3W0Mgb736f54hqgjjKYC8GteA/HoQH5D+3QPH61cVYH1NEeXGdORRrQHsAsqBVi5pJWb6G42vENOOpDC+wJ5Wy8g8OlBBa4GncJlTbOWgUtURYdaDTnXyksw48hzGxGcZOJm9CH0ICcQSvmwv739iYOhT1aWh6+gAZsO1Yhbd7rcXyHEaiDLRAbVyhwAzQEA2jDfNgLPV9Cr0IPqouNs1YgAw1JF17E9ebmnNNFTgHvgzjF+e7AL9AQncXL8CCowbaciD4cwE78hq1YDnGNs57B7pDievEcxKiAFOAcZ3l+ZGdA/yvsQxMqIUEJYiO1WIcujEGLNISteAIeBBK3uFxp3IsGNGE9WvAxPsDraMQDSId9X+YVeZsPNYw7FOMAAAAASUVORK5CYII=';
+
+let stream = null, camFacing = 'environment', fotoAtual = null;
+let matriculaCapturada = '';                  // matrícula congelada na abertura da câmera
+let camGen = 0;                               // geração da câmera — invalida getUserMedia em voo
+let esperaInterval = null;                    // handle do polling do 1º frame
+const emVoo = new Set();                       // ids com POST em andamento (impede duplo envio)
+
+/* ==================== util ==================== */
+function toast(msg, ms=3200){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), ms);
+}
+const pad = n => String(n).padStart(2,'0');
+function stampArquivo(){
+  const d = new Date();
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+function horaBr(iso){
+  const d = new Date(iso);
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function bytesBase64(b64){                       // tamanho real do arquivo em bytes
+  let pad = 0;
+  if(b64.endsWith('==')) pad = 2; else if(b64.endsWith('=')) pad = 1;
+  return (b64.length * 3 / 4) - pad;
+}
+// Remove espaços e caracteres proibidos em nome de arquivo do SharePoint (" * : < > ? / \ | # %),
+// o que também elimina qualquer vetor de injeção de HTML pela matrícula.
+function normalizaMatricula(v){
+  return String(v || '').replace(/[\s"*:<>?/\\|#%]/g, '');
+}
+// Escapa texto para interpolação segura em innerHTML.
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+/* ==================== câmera ==================== */
+async function abrirCamera(){
+  const matricula = normalizaMatricula(document.getElementById('matricula').value);
+  document.getElementById('matricula').value = matricula;     // reflete a limpeza na tela
+  if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
+  if(!cfg().endpoint){ toast('⚠️ Configure a URL do fluxo em ⚙️ antes de começar.'); abrirConfig(); return; }
+
+  const jaEnviado = hist().find(h => h.matricula === matricula && h.status === 'enviado');
+  if(jaEnviado && !confirm(`Já existe foto enviada para a matrícula ${matricula} (em ${horaBr(jaEnviado.ts)}).\nUma nova captura vai substituir a linha na planilha. Continuar?`)) return;
+
+  matriculaCapturada = matricula;                             // congela — não relê o input depois
+  document.getElementById('camMatricula').textContent = matricula;
+  document.getElementById('camScreen').classList.remove('hidden');
+  await ligarStream();
+}
+
+async function ligarStream(){
+  desligarStream();                    // incrementa camGen e para stream/interval anteriores
+  const gen = ++camGen;
+  const video = document.getElementById('video');
+  const btn = document.getElementById('btnShutter');
+  btn.disabled = true;
+  try{
+    const s = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: camFacing, width:{ideal:1920}, height:{ideal:1440} },
+      audio: false
+    });
+    // se a câmera foi fechada/trocada enquanto getUserMedia resolvia, descarta este stream
+    if(gen !== camGen || document.getElementById('camScreen').classList.contains('hidden')){
+      s.getTracks().forEach(t => t.stop());
+      return;
+    }
+    stream = s;
+    video.srcObject = stream;
+    video.classList.toggle('espelho', camFacing === 'user');
+    await video.play();
+    clearInterval(esperaInterval);
+    esperaInterval = setInterval(()=>{
+      if(gen !== camGen){ clearInterval(esperaInterval); return; }   // câmera trocada/fechada
+      if(video.videoWidth > 0){ clearInterval(esperaInterval); btn.disabled = false; }
+    }, 100);
+  }catch(e){
+    if(gen !== camGen) return;          // erro de um stream já obsoleto — ignora
+    fecharCamera();
+    if(e.name === 'NotAllowedError') toast('🚫 Permissão de câmera negada. Libere o acesso nas configurações do navegador.');
+    else if(location.protocol === 'file:') toast('🚫 A câmera não funciona abrindo o arquivo direto. Use a URL do GitHub Pages (https).', 5000);
+    else toast('🚫 Não foi possível acessar a câmera: ' + e.message, 4500);
+  }
+}
+
+function desligarStream(){
+  camGen++;                             // invalida qualquer getUserMedia ainda em voo
+  clearInterval(esperaInterval); esperaInterval = null;
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; }
+}
+function fecharCamera(){
+  desligarStream();
+  document.getElementById('camScreen').classList.add('hidden');
+}
+async function trocarCamera(){
+  camFacing = camFacing === 'environment' ? 'user' : 'environment';
+  await ligarStream();
+}
+
+/* ==================== foto 3x4 ≤ 40 KB ==================== */
+/* Recorta a região central 3:4 da origem e comprime até caber no limite.
+   Se nem a qualidade mínima bastar, reduz a resolução e tenta de novo. */
+function gerarFoto3x4(source, sw, sh){
+  const ratio = FOTO_W / FOTO_H;
+  let cw, ch;
+  if(sw/sh > ratio){ ch = sh; cw = sh*ratio; } else { cw = sw; ch = sw/ratio; }
+  const sx = (sw-cw)/2, sy = (sh-ch)/2;
+
+  const escalas = [1, 0.85, 0.7, 0.55];      // 354×472 → 300×400 → 248×330 → 195×260
+  for(const esc of escalas){
+    const w = Math.round(FOTO_W*esc), h = Math.round(FOTO_H*esc);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(source, sx, sy, cw, ch, 0, 0, w, h);
+    for(let qi = 90; qi >= 35; qi -= 5){       // 0.90→0.35 em passos alinhados (garante testar o piso)
+      const dataUrl = c.toDataURL('image/jpeg', qi/100);
+      const bytes = bytesBase64(dataUrl.split(',')[1]);
+      if(bytes <= LIMITE_BYTES){
+        const tc = document.createElement('canvas'); tc.width = 90; tc.height = 120;
+        tc.getContext('2d').drawImage(c, 0, 0, 90, 120);
+        return { dataUrl, thumb: tc.toDataURL('image/jpeg', 0.6), bytes, w, h };
+      }
+    }
+  }
+  return null;   // impossível na prática — mas nunca envia acima do limite
+}
+
+function capturar(){
+  const video = document.getElementById('video');
+  if(!video.videoWidth){ toast('Câmera ainda carregando...'); return; }
+
+  const foto = gerarFoto3x4(video, video.videoWidth, video.videoHeight);
+  if(!foto){ toast('❌ Não foi possível ajustar a foto para 40 KB. Tente novamente.'); return; }
+  foto.matricula = matriculaCapturada;        // congela a matrícula junto com a foto
+
+  fotoAtual = foto;
+  fecharCamera();
+  document.getElementById('prevImg').src = foto.dataUrl;
+  document.getElementById('prevMatricula').textContent = foto.matricula;
+  document.getElementById('prevTamanho').textContent =
+    `✔ 3x4 digital ${foto.w}×${foto.h} px • ${(foto.bytes/1024).toFixed(1)} KB (limite ${LIMITE_KB} KB)`;
+  document.getElementById('btnConfirmar').textContent = `✅ Enviar matrícula ${foto.matricula}`;
+  document.getElementById('prevScreen').classList.remove('hidden');
+}
+
+function repetir(){
+  document.getElementById('prevScreen').classList.add('hidden');
+  fotoAtual = null;
+  document.getElementById('camScreen').classList.remove('hidden');
+  ligarStream();
+}
+
+/* ==================== envio ==================== */
+async function confirmarEnvio(){
+  // travas finais de segurança: matrícula e tamanho vêm CONGELADOS da captura,
+  // então limpar o campo na tela não afeta o que é enviado
+  if(!fotoAtual || fotoAtual.bytes > LIMITE_BYTES){
+    toast('❌ Foto fora do padrão de 40 KB. Capture novamente.'); return;
+  }
+  const matricula = fotoAtual.matricula;
+  if(!matricula){ toast('❌ Matrícula ausente. Refaça a captura.'); return; }
+  document.getElementById('prevScreen').classList.add('hidden');
+
+  const payload = {
+    matricula,
+    timestamp: new Date().toISOString(),
+    arquivo  : `${matricula}_${stampArquivo()}.jpg`,
+    foto     : fotoAtual.dataUrl.split(',')[1]   // base64 puro, sem prefixo
+  };
+
+  const rec = {
+    id: Date.now(), matricula,
+    ts: payload.timestamp, status: 'enviando',
+    thumb: fotoAtual.thumb, kb: +(fotoAtual.bytes/1024).toFixed(1),
+    link: '', erroMsg: '', payload
+  };
+  fotoAtual = null;
+
+  const h = hist(); h.unshift(rec);
+  const ok = saveHist(h.slice(0, HIST_CAP));
+  renderHist();
+  if(!ok) toast('⚠️ Armazenamento do aparelho cheio: limpe o histórico. Tentando enviar mesmo assim...', 5000);
+
+  await enviar(rec.id, rec);                    // passa o rec para não depender do que ficou salvo
+}
+
+async function enviar(id, recInline){
+  if(emVoo.has(id)) return;                     // já existe um POST deste registro em andamento
+  const rec = recInline || hist().find(r => r.id === id);
+  if(!rec || !rec.payload) return;
+  emVoo.add(id);
+
+  // marca 'enviando' no histórico persistido (se o registro estiver lá)
+  { const h = hist(); const rr = h.find(x => x.id === id);
+    if(rr){ rr.status = 'enviando'; rr.erroMsg = ''; saveHist(h); } renderHist(); }
+
+  try{
+    const r = await fetch(cfg().endpoint, {
+      method : 'POST',
+      headers: {'Content-Type':'application/json'},
+      body   : JSON.stringify(rec.payload)
+    });
+    if(!r.ok){
+      let msg = 'HTTP ' + r.status;
+      try{ const d = await r.json(); if(d && d.erro) msg = d.erro; }catch(_){}
+      const err = new Error(msg);
+      // 4xx (menos 408/429) = rejeição permanente: reenviar o mesmo payload não adianta
+      err.permanente = r.status >= 400 && r.status < 500 && r.status !== 408 && r.status !== 429;
+      throw err;
+    }
+    let data = {}; try{ data = await r.json(); }catch(_){}
+    const h2 = hist(); const rec2 = h2.find(x => x.id === id);
+    if(rec2){ rec2.status = 'enviado'; rec2.link = data.link || ''; rec2.erroMsg = ''; delete rec2.payload; saveHist(h2); }
+    renderHist();
+    toast(`✅ Matrícula ${rec.matricula} enviada com sucesso!`);
+    limparForm();
+  }catch(e){
+    const h2 = hist(); const rec2 = h2.find(x => x.id === id);
+    if(rec2){ rec2.status = e.permanente ? 'rejeitado' : 'erro'; rec2.erroMsg = e.message || ''; saveHist(h2); }
+    renderHist();
+    toast(e.permanente
+      ? `⛔ Matrícula ${rec.matricula} rejeitada: ${e.message}. Confira e capture de novo.`
+      : '⚠️ Falha no envio. Toque em "Reenviar" no histórico.', 5000);
+  }finally{
+    emVoo.delete(id);
+  }
+}
+
+function limparForm(){
+  document.getElementById('matricula').value = '';
+  document.getElementById('matricula').focus();
+}
+
+/* ==================== histórico ==================== */
+function renderHist(){
+  const h = hist();
+  const enviados = h.filter(x => x.status === 'enviado').length;
+  document.getElementById('histCount').textContent = h.length ? `(${enviados}/${h.length} enviadas)` : '';
+  const el = document.getElementById('histList');
+  if(!h.length){ el.innerHTML = '<div class="empty">Nenhuma captura ainda.</div>'; return; }
+
+  el.innerHTML = h.map(r => {
+    const chip = r.status === 'enviado'   ? '<span class="chip chip-ok">✅ Enviado</span>'
+               : r.status === 'enviando'  ? '<span class="chip chip-env">⏳ Enviando...</span>'
+               : r.status === 'rejeitado' ? '<span class="chip chip-erro">⛔ Rejeitado</span>'
+               : '<span class="chip chip-erro">⚠️ Erro no envio</span>';
+    const acoes =
+      (r.status === 'erro' && r.payload ? `<button class="btn btn-dark btn-sm" onclick="enviar(${r.id})">🔁 Reenviar</button>` : '') +
+      (r.link ? `<button class="btn btn-outline btn-sm" onclick="copiarLink(${r.id})">🔗 Link</button>` : '') +
+      `<button class="btn btn-outline btn-sm" onclick="removerHist(${r.id})" title="Remover do histórico">🗑️</button>`;
+    const detalhe = r.erroMsg ? ` • ${esc(r.erroMsg)}` : (r.kb ? ' • '+r.kb+' KB' : '');
+    return `<div class="hist-item">
+      <img class="hist-thumb" src="${r.thumb||''}" alt="">
+      <div class="hist-info">
+        <div class="hist-nome">Matrícula ${esc(r.matricula)}</div>
+        <div class="hist-meta">${horaBr(r.ts)}${detalhe}</div>
+        ${chip}
+      </div>
+      <div class="hist-actions">${acoes}</div>
+    </div>`;
+  }).join('');
+}
+
+function copiarLink(id){
+  const rec = hist().find(r => r.id === id);
+  if(!rec || !rec.link) return;
+  navigator.clipboard.writeText(rec.link).then(()=>toast('🔗 Link copiado!')).catch(()=>prompt('Copie o link:', rec.link));
+}
+function removerHist(id){
+  if(!confirm('Remover este registro do histórico do aparelho? (não afeta a planilha nem a foto no SharePoint)')) return;
+  saveHist(hist().filter(r => r.id !== id)); renderHist();
+}
+function abrirExcel(){
+  const url = cfg().excelUrl;
+  if(url) window.open(url, '_blank');
+}
+
+/* ==================== config ==================== */
+function abrirConfig(){
+  document.getElementById('cfgEndpoint').value = cfg().endpoint || '';
+  document.getElementById('cfgExcel').value = cfg().excelUrl || '';
+  document.getElementById('modalCfg').classList.remove('hidden');
+}
+function fecharConfig(){ document.getElementById('modalCfg').classList.add('hidden'); }
+function salvarConfig(){
+  saveCfg({ endpoint: document.getElementById('cfgEndpoint').value.trim(),
+            excelUrl: document.getElementById('cfgExcel').value.trim() });
+  fecharConfig(); aplicarCfg(); toast('✅ Configurações salvas.');
+}
+function aplicarCfg(){
+  document.getElementById('btnExcel').style.display = cfg().excelUrl ? '' : 'none';
+  // engrenagem verde quando o fluxo já está configurado (igual ao app de Treinamentos)
+  document.getElementById('gearBtn').classList.toggle('ok', !!cfg().endpoint);
+}
+
+/* Gera um link que configura outro celular automaticamente (ex.: o do Jeferson) */
+function copiarLinkConfig(){
+  const endpoint = document.getElementById('cfgEndpoint').value.trim();
+  if(!endpoint){ toast('Informe a URL do fluxo primeiro.'); return; }
+  const excel = document.getElementById('cfgExcel').value.trim();
+  let url = location.origin + location.pathname + '?endpoint=' + encodeURIComponent(endpoint);
+  if(excel) url += '&excel=' + encodeURIComponent(excel);
+  navigator.clipboard.writeText(url)
+    .then(()=>toast('📲 Link copiado! Envie ao outro operador — ao abrir, o app já fica configurado.', 5000))
+    .catch(()=>prompt('Copie o link de configuração:', url));
+}
+
+async function testarConexao(){
+  const url = document.getElementById('cfgEndpoint').value.trim();
+  if(!url){ toast('Informe a URL do fluxo primeiro.'); return; }
+  toast('⏳ Enviando teste...');
+  // gera uma imagem de teste válida (não precisa de câmera)
+  const c = document.createElement('canvas'); c.width = FOTO_W; c.height = FOTO_H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f5c800'; ctx.fillRect(0,0,FOTO_W,FOTO_H);
+  ctx.fillStyle = '#111827'; ctx.font = 'bold 40px Arial'; ctx.fillText('TESTE', 100, 240);
+  const teste = gerarFoto3x4(c, FOTO_W, FOTO_H);
+  try{
+    const r = await fetch(url, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        matricula:'00000',
+        timestamp:new Date().toISOString(),
+        arquivo:`00000_${stampArquivo()}.jpg`,
+        foto: teste.dataUrl.split(',')[1]
+      })
+    });
+    toast(r.ok ? '✅ Conexão OK! Verifique a foto e a linha de teste no SharePoint.' : `⚠️ Resposta ${r.status} — confira a URL e o fluxo.`, 5000);
+  }catch(e){
+    toast('❌ Falha na conexão: ' + e.message, 5000);
+  }
+}
+
+/* ==================== init ==================== */
+// configuração automática via link (?endpoint=...&excel=...)
+(function(){
+  const p = new URLSearchParams(location.search);
+  if(p.get('endpoint')){
+    saveCfg({ endpoint: p.get('endpoint'), excelUrl: p.get('excel') || cfg().excelUrl || '' });
+    history.replaceState({}, '', location.pathname);
+    setTimeout(()=>toast('✅ App configurado automaticamente pelo link!', 4500), 400);
+  }
+})();
+
+// recupera registros presos em 'enviando' (app fechado/recarregado no meio do envio):
+// vira 'erro' com payload preservado, então o botão Reenviar volta a aparecer
+(function(){
+  const h = hist(); let mudou = false;
+  h.forEach(r => {
+    if(r.status === 'enviando'){
+      r.status = r.payload ? 'erro' : 'rejeitado';
+      r.erroMsg = 'Envio interrompido — o app foi fechado. Reenvie.';
+      mudou = true;
+    }
+  });
+  if(mudou) saveHist(h);
+})();
+
+// sanitiza a matrícula em tempo real (só remove caracteres proibidos, preserva zeros à esquerda)
+(function(){
+  const inp = document.getElementById('matricula');
+  inp.addEventListener('input', () => {
+    const limpo = normalizaMatricula(inp.value);
+    if(limpo !== inp.value) inp.value = limpo;
+  });
+})();
+
+// pinta os logos do Grupo Maroni (barra, header de marca e rodapé)
+['logoBar','logoBrand','logoFoot'].forEach(id => { const el = document.getElementById(id); if(el) el.src = _LOGO_SRC; });
+
+renderHist(); aplicarCfg();
+if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure a URL do fluxo.', 5000), 600);
+</script>
+</body>
+</html>
