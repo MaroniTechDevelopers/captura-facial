@@ -147,19 +147,18 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
   </div>
 
   <div class="card" id="baseCard">
-    <div class="card-title">Base de colaboradores</div>
+    <div class="card-title">Base de ativos</div>
     <div id="baseStatus" class="base-status"></div>
     <div class="base-btns">
-      <label class="btn btn-outline btn-sm file-btn">📥 Importar ativos (CSV)
-        <input type="file" accept=".csv,text/csv" onchange="importarBase(this,'ativos')" hidden>
-      </label>
-      <label class="btn btn-outline btn-sm file-btn">🚫 Importar desligados (CSV)
-        <input type="file" accept=".csv,text/csv" onchange="importarBase(this,'desligados')" hidden>
+      <button class="btn btn-outline btn-sm" onclick="carregarBaseDoSharePoint(true)">🔄 Atualizar base</button>
+      <label class="btn btn-outline btn-sm file-btn">➕ Importar novos ativos (CSV)
+        <input type="file" accept=".csv,text/csv" onchange="importarBase(this)" hidden>
       </label>
     </div>
     <div class="dicas" style="margin-top:12px">
-      Exporte a base do RH como <b>CSV</b> (aba com colunas <b>Cadastro/Matrícula</b> e <b>Nome</b>) e importe aqui.
-      A matrícula é conferida nesta base antes de capturar. Desligados são só as matrículas (uma por linha).
+      A base é puxada da planilha no SharePoint (botão <b>Atualizar base</b>, e automaticamente ao abrir).
+      A matrícula é conferida nela e o nome aparece antes de capturar. Para <b>novos ativos</b>, importe um
+      <b>CSV</b> (colunas <b>Cadastro/Matrícula</b> e <b>Nome</b>) — eles são adicionados na base central do SharePoint.
     </div>
   </div>
 
@@ -212,10 +211,12 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
   <div class="modal">
     <h3>⚙️ Configurações</h3>
     <p class="sub">URLs geradas no Power Automate e SharePoint. Ficam salvas apenas neste aparelho — use "Copiar link de configuração" para configurar o celular do outro operador em 1 toque.</p>
-    <label>URL do Fluxo (HTTP trigger do Power Automate) *</label>
+    <label>URL do Fluxo — captura de foto (HTTP) *</label>
     <input id="cfgEndpoint" placeholder="https://prod-XX.brazilsouth.logic.azure.com/...">
+    <label>URL do Fluxo — base de ativos (listar/adicionar)</label>
+    <input id="cfgBase" placeholder="https://prod-XX...  (fluxo Base Ativos — App)">
     <label>Link da planilha no SharePoint (opcional)</label>
-    <input id="cfgExcel" placeholder="https://transmaroni.sharepoint.com/...">
+    <input id="cfgExcel" placeholder="https://grupotransmaroni.sharepoint.com/...">
     <div class="m-foot">
       <button class="btn btn-outline btn-sm" onclick="copiarLinkConfig()">📲 Copiar link de configuração</button>
       <button class="btn btn-outline btn-sm" onclick="testarConexao()">🔌 Testar conexão</button>
@@ -237,12 +238,10 @@ const HIST_CAP = 150;                       // máx. de registros no histórico 
 
 const K_CFG  = 'facial_config_v1';
 const K_HIST = 'facial_hist_v1';
-const K_BASE = 'facial_base_v1';   // { matricula: nome } dos ativos
-const K_DESL = 'facial_desl_v1';   // [ matricula, ... ] dos desligados
+const K_BASE = 'facial_base_v1';   // { matricula: nome } dos ativos (puxada do SharePoint)
 const cfg    = () => JSON.parse(localStorage.getItem(K_CFG)  || '{}');
 const hist   = () => JSON.parse(localStorage.getItem(K_HIST) || '[]');
 const base   = () => JSON.parse(localStorage.getItem(K_BASE) || '{}');
-const desl   = () => JSON.parse(localStorage.getItem(K_DESL) || '[]');
 const saveCfg  = c => localStorage.setItem(K_CFG,  JSON.stringify(c));
 
 // Grava o histórico com proteção contra estouro de quota do localStorage:
@@ -334,43 +333,67 @@ function parseCsv(texto){
   return linhas.map(parseLinha);
 }
 
-async function importarBase(input, tipo){
+// Puxa a base de ATIVOS da planilha no SharePoint (via fluxo "Base Ativos — App", ação listar).
+async function carregarBaseDoSharePoint(mostrar){
+  const url = cfg().baseEndpoint;
+  if(!url){ if(mostrar) toast('⚠️ Configure a URL do fluxo da base em ⚙️.'); return; }
+  if(mostrar) toast('🔄 Atualizando base do SharePoint...');
+  try{
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listar' }) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const lista = data.ativos || data.value || [];
+    const mapa = {};
+    lista.forEach(x => {
+      const m = normalizaMatricula(x.matricula ?? x.Matricula ?? x.matrícula ?? '');
+      const n = x.nome ?? x.Nome ?? x.Nome_Usuario ?? '';
+      if(m) mapa[m] = n;
+    });
+    localStorage.setItem(K_BASE, JSON.stringify(mapa));
+    renderBaseStatus(); atualizarLookup();
+    if(mostrar) toast(`✅ Base atualizada: ${Object.keys(mapa).length} ativos.`);
+  }catch(e){
+    if(mostrar) toast('❌ Falha ao atualizar a base: ' + e.message, 4500);
+  }
+}
+
+// Importa um CSV de NOVOS ativos e os adiciona à base CENTRAL no SharePoint (ação adicionar),
+// depois re-puxa a base atualizada.
+async function importarBase(input){
   const file = input.files && input.files[0];
   input.value = '';                                     // permite reimportar o mesmo arquivo
   if(!file) return;
+  if(!cfg().baseEndpoint){ toast('⚠️ Configure a URL do fluxo da base em ⚙️ antes de importar.'); return; }
   try{
     const linhas = parseCsv(await file.text());
     if(linhas.length < 1){ toast('CSV vazio.'); return; }
     const cab = linhas[0].map(h => h.toLowerCase());
-    // acha a coluna da matrícula (Cadastro/Matrícula) e do nome
     const iMat = cab.findIndex(h => h.includes('cadastro') || h.includes('matr'));
     const iNome = cab.findIndex(h => h.includes('nome'));
     const temCab = iMat !== -1;
     const colMat = temCab ? iMat : 0;
     const inicio = temCab ? 1 : 0;
+    if(iNome === -1 && temCab){ toast('⚠️ Não achei a coluna "Nome" no CSV.'); return; }
 
-    if(tipo === 'ativos'){
-      if(iNome === -1 && temCab){ toast('⚠️ Não achei a coluna "Nome" no CSV.'); return; }
-      const mapa = {};
-      for(let i=inicio;i<linhas.length;i++){
-        const m = normalizaMatricula(linhas[i][colMat] || '');
-        const n = (iNome !== -1 ? linhas[i][iNome] : linhas[i][1]) || '';
-        if(m) mapa[m] = n;
-      }
-      localStorage.setItem(K_BASE, JSON.stringify(mapa));
-      toast(`✅ Base de ativos: ${Object.keys(mapa).length} colaboradores.`);
-    } else {
-      const lista = [];
-      for(let i=inicio;i<linhas.length;i++){
-        const m = normalizaMatricula(linhas[i][colMat] || '');
-        if(m) lista.push(m);
-      }
-      localStorage.setItem(K_DESL, JSON.stringify([...new Set(lista)]));
-      toast(`✅ Desligados: ${new Set(lista).size} matrículas.`);
+    const jaTem = base();
+    const novos = [];
+    for(let i=inicio;i<linhas.length;i++){
+      const m = normalizaMatricula(linhas[i][colMat] || '');
+      const n = (iNome !== -1 ? linhas[i][iNome] : linhas[i][1]) || '';
+      if(m && jaTem[m] == null) novos.push({ matricula:m, nome:n });   // só quem ainda não está na base
     }
-    renderBaseStatus(); atualizarLookup();
+    if(!novos.length){ toast('Nenhum ativo novo no CSV (todos já estão na base).'); return; }
+
+    toast(`⏳ Enviando ${novos.length} novo(s) ativo(s) ao SharePoint...`);
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao:'adicionar', ativos: novos })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    toast(`✅ ${novos.length} ativo(s) adicionado(s) à base central.`);
+    await carregarBaseDoSharePoint(false);              // re-puxa já com os novos
   }catch(e){
-    toast('❌ Falha ao ler o CSV: ' + e.message, 4500);
+    toast('❌ Falha ao importar novos ativos: ' + e.message, 4500);
   }
 }
 
@@ -379,19 +402,18 @@ function lookupMatricula(matricula){
   const m = normalizaMatricula(matricula);
   if(!m) return { status:'vazio', nome:'' };
   const b = base(); const temBase = Object.keys(b).length > 0;
-  if(desl().includes(m)) return { status:'desligado', nome: b[m] || '' };
   if(!temBase) return { status:'sem_base', nome:'' };
   if(b[m] != null) return { status:'ok', nome: b[m] };
   return { status:'nao_encontrado', nome:'' };
 }
 
 function renderBaseStatus(){
-  const nA = Object.keys(base()).length, nD = desl().length;
+  const nA = Object.keys(base()).length;
   const el = document.getElementById('baseStatus');
   if(!el) return;
   el.innerHTML = nA
-    ? `✅ <b>${nA}</b> ativos${nD ? ` · 🚫 <b>${nD}</b> desligados` : ''} carregados`
-    : `<span class="dim">Nenhuma base importada ainda — importe os ativos para conferir as matrículas.</span>`;
+    ? `✅ <b>${nA}</b> ativos carregados`
+    : `<span class="dim">Base não carregada — toque em "Atualizar base" (ou configure a URL da base em ⚙️).</span>`;
 }
 
 // atualiza o texto de conferência do nome enquanto digita a matrícula
@@ -403,9 +425,8 @@ function atualizarLookup(){
   if(!m){ el.textContent = ''; el.className = 'nome-lookup'; return; }
   const r = lookupMatricula(m);
   if(r.status === 'ok'){ el.textContent = '✔ ' + r.nome; el.className = 'nome-lookup ok'; }
-  else if(r.status === 'desligado'){ el.textContent = '⛔ DESLIGADO' + (r.nome ? ' — ' + r.nome : ''); el.className = 'nome-lookup err'; }
   else if(r.status === 'nao_encontrado'){ el.textContent = '⚠️ Matrícula não encontrada na base de ativos'; el.className = 'nome-lookup warn'; }
-  else { el.textContent = ''; el.className = 'nome-lookup'; }   // sem_base: não polui
+  else { el.textContent = ''; el.className = 'nome-lookup'; }   // sem_base/vazio: não polui
 }
 
 /* ==================== ambiente Teams ==================== */
@@ -467,14 +488,12 @@ async function abrirCamera(){
   if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
   if(!cfg().endpoint){ toast('⚠️ Configure a URL do fluxo em ⚙️ antes de começar.'); abrirConfig(); return; }
 
-  // confere a matrícula na base de ativos antes de capturar
+  // confere a matrícula na base de ativos (puxada do SharePoint) antes de capturar
   const r = lookupMatricula(matricula);
   if(r.status === 'sem_base'){
-    if(!confirm('Nenhuma base de ativos foi importada, então não dá para conferir a matrícula.\nImporte a base em "Base de colaboradores". Deseja capturar mesmo assim?')) return;
-  } else if(r.status === 'desligado'){
-    if(!confirm(`⛔ ATENÇÃO: a matrícula ${matricula}${r.nome ? ' ('+r.nome+')' : ''} está na lista de DESLIGADOS.\nNão deveria ganhar acesso. Capturar mesmo assim?`)) return;
+    if(!confirm('A base de ativos ainda não foi carregada, então não dá para conferir a matrícula.\nToque em "Atualizar base". Deseja capturar mesmo assim?')) return;
   } else if(r.status === 'nao_encontrado'){
-    if(!confirm(`⚠️ A matrícula ${matricula} NÃO está na base de ativos.\nConfira se digitou certo. Capturar mesmo assim?`)) return;
+    if(!confirm(`⚠️ A matrícula ${matricula} NÃO está na base de ativos.\nConfira se digitou certo (ou atualize a base). Capturar mesmo assim?`)) return;
   }
   const nomeConf = r.nome || '';
 
@@ -731,14 +750,18 @@ function abrirExcel(){
 /* ==================== config ==================== */
 function abrirConfig(){
   document.getElementById('cfgEndpoint').value = cfg().endpoint || '';
+  document.getElementById('cfgBase').value = cfg().baseEndpoint || '';
   document.getElementById('cfgExcel').value = cfg().excelUrl || '';
   document.getElementById('modalCfg').classList.remove('hidden');
 }
 function fecharConfig(){ document.getElementById('modalCfg').classList.add('hidden'); }
 function salvarConfig(){
+  const baseAntes = cfg().baseEndpoint || '';
   saveCfg({ endpoint: document.getElementById('cfgEndpoint').value.trim(),
+            baseEndpoint: document.getElementById('cfgBase').value.trim(),
             excelUrl: document.getElementById('cfgExcel').value.trim() });
   fecharConfig(); aplicarCfg(); toast('✅ Configurações salvas.');
+  if(cfg().baseEndpoint && cfg().baseEndpoint !== baseAntes) carregarBaseDoSharePoint(true);
 }
 function aplicarCfg(){
   document.getElementById('btnExcel').style.display = cfg().excelUrl ? '' : 'none';
@@ -750,8 +773,10 @@ function aplicarCfg(){
 function copiarLinkConfig(){
   const endpoint = document.getElementById('cfgEndpoint').value.trim();
   if(!endpoint){ toast('Informe a URL do fluxo primeiro.'); return; }
+  const baseEp = document.getElementById('cfgBase').value.trim();
   const excel = document.getElementById('cfgExcel').value.trim();
   let url = location.origin + location.pathname + '?endpoint=' + encodeURIComponent(endpoint);
+  if(baseEp) url += '&base=' + encodeURIComponent(baseEp);
   if(excel) url += '&excel=' + encodeURIComponent(excel);
   navigator.clipboard.writeText(url)
     .then(()=>toast('📲 Link copiado! Envie ao outro operador — ao abrir, o app já fica configurado.', 5000))
@@ -785,11 +810,13 @@ async function testarConexao(){
 }
 
 /* ==================== init ==================== */
-// configuração automática via link (?endpoint=...&excel=...)
+// configuração automática via link (?endpoint=...&base=...&excel=...)
 (function(){
   const p = new URLSearchParams(location.search);
   if(p.get('endpoint')){
-    saveCfg({ endpoint: p.get('endpoint'), excelUrl: p.get('excel') || cfg().excelUrl || '' });
+    saveCfg({ endpoint: p.get('endpoint'),
+              baseEndpoint: p.get('base') || cfg().baseEndpoint || '',
+              excelUrl: p.get('excel') || cfg().excelUrl || '' });
     history.replaceState({}, '', location.pathname);
     setTimeout(()=>toast('✅ App configurado automaticamente pelo link!', 4500), 400);
   }
@@ -826,7 +853,9 @@ async function testarConexao(){
 teamsReady = detectarTeams();
 
 renderHist(); aplicarCfg(); renderBaseStatus();
-if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure a URL do fluxo.', 5000), 600);
+// puxa a base de ativos do SharePoint ao abrir (se a URL da base estiver configurada)
+if(cfg().baseEndpoint) carregarBaseDoSharePoint(false);
+if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure as URLs em ⚙️.', 5000), 600);
 </script>
 </body>
 </html>
