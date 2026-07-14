@@ -147,18 +147,22 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
   </div>
 
   <div class="card" id="baseCard">
-    <div class="card-title">Base de ativos</div>
+    <div class="card-title">Base de colaboradores</div>
     <div id="baseStatus" class="base-status"></div>
     <div class="base-btns">
       <button class="btn btn-outline btn-sm" onclick="carregarBaseDoSharePoint(true)">🔄 Atualizar base</button>
       <label class="btn btn-outline btn-sm file-btn">➕ Importar novos ativos (CSV)
         <input type="file" accept=".csv,text/csv" onchange="importarBase(this)" hidden>
       </label>
+      <label class="btn btn-outline btn-sm file-btn">🚫 Importar desligados (CSV)
+        <input type="file" accept=".csv,text/csv" onchange="importarDesligados(this)" hidden>
+      </label>
     </div>
     <div class="dicas" style="margin-top:12px">
-      A base é puxada da planilha no SharePoint (botão <b>Atualizar base</b>, e automaticamente ao abrir).
-      A matrícula é conferida nela e o nome aparece antes de capturar. Para <b>novos ativos</b>, importe um
-      <b>CSV</b> (colunas <b>Cadastro/Matrícula</b> e <b>Nome</b>) — eles são adicionados na base central do SharePoint.
+      A base de <b>ativos</b> é puxada da planilha no SharePoint (botão <b>Atualizar base</b> e ao abrir).
+      <b>Novos ativos:</b> importe um CSV (colunas <b>Cadastro/Matrícula</b> e <b>Nome</b>) → entram na base central.<br>
+      <b>Desligados:</b> importe um CSV com as matrículas (uma por linha) → o app os marca como
+      <b>Inativo</b> na planilha; na próxima importação o InControl <b>tira o acesso</b> deles.
     </div>
   </div>
 
@@ -394,6 +398,42 @@ async function importarBase(input){
     await carregarBaseDoSharePoint(false);              // re-puxa já com os novos
   }catch(e){
     toast('❌ Falha ao importar novos ativos: ' + e.message, 4500);
+  }
+}
+
+// Importa um CSV de DESLIGADOS (matrículas) e os adiciona à aba Desligados no SharePoint
+// (ação desligar) → o Estado deles vira Inativo na planilha → perdem o acesso na importação.
+async function importarDesligados(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  if(!cfg().baseEndpoint){ toast('⚠️ Configure a URL do fluxo da base em ⚙️ antes de importar.'); return; }
+  try{
+    const linhas = parseCsv(await file.text());
+    if(linhas.length < 1){ toast('CSV vazio.'); return; }
+    const cab = linhas[0].map(h => h.toLowerCase());
+    const iMat = cab.findIndex(h => h.includes('cadastro') || h.includes('matr'));
+    const temCab = iMat !== -1;
+    const colMat = temCab ? iMat : 0;
+    const inicio = temCab ? 1 : 0;
+    const matriculas = [];
+    for(let i=inicio;i<linhas.length;i++){
+      const m = normalizaMatricula(linhas[i][colMat] || '');
+      if(m) matriculas.push(m);
+    }
+    const unicas = [...new Set(matriculas)];
+    if(!unicas.length){ toast('Nenhuma matrícula encontrada no CSV.'); return; }
+    if(!confirm(`Marcar ${unicas.length} matrícula(s) como DESLIGADAS (Inativo)?\nElas perderão o acesso na próxima importação do InControl.`)) return;
+
+    toast(`⏳ Enviando ${unicas.length} desligado(s) ao SharePoint...`);
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao:'desligar', matriculas: unicas })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    toast(`✅ ${unicas.length} desligado(s) marcados como Inativo na planilha.`, 5000);
+  }catch(e){
+    toast('❌ Falha ao importar desligados: ' + e.message, 4500);
   }
 }
 
