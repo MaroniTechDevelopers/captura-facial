@@ -49,6 +49,17 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
 
 .dicas{background:#fffbe6;border:1px solid #f5e08a;border-radius:10px;padding:10px 12px;font-size:.76rem;color:#6b5900;margin-top:14px;line-height:1.55}
 
+/* ---------- lookup de nome + base ---------- */
+.nome-lookup{margin:8px 0 2px;font-size:.9rem;font-weight:700;min-height:22px}
+.nome-lookup.ok{color:#15803d}
+.nome-lookup.warn{color:#b45309}
+.nome-lookup.err{color:#b91c1c}
+.base-status{font-size:.8rem;color:#374151;margin-bottom:12px;font-weight:600}
+.base-status .dim{color:#9ca3af;font-weight:500}
+.base-btns{display:flex;gap:10px;flex-wrap:wrap}
+.file-btn{cursor:pointer;display:inline-flex;align-items:center}
+.file-btn input{display:none}
+
 /* ---------- histórico ---------- */
 .hist-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6}
 .hist-item:last-child{border-bottom:none}
@@ -122,13 +133,31 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
     <div class="card-title">Nova captura</div>
     <label>Matrícula do colaborador *</label>
     <input id="matricula" class="input-matricula" inputmode="numeric" placeholder="0000" autocomplete="off">
+    <div id="nomeLookup" class="nome-lookup"></div>
     <button class="btn btn-yellow btn-block" onclick="abrirCamera()">📷 Capturar foto</button>
     <div class="dicas">
-      <b>Confira a matrícula com atenção</b> — o nome é puxado da base do RH por ela.<br><br>
+      <b>Confira a matrícula com atenção</b> — o nome aparece aqui pela base do RH.<br><br>
       <b>Padrão automático da foto:</b> 3x4 digital (354×472 px), JPG, no máximo <b>40 KB</b> —
       o app ajusta sozinho antes de enviar.<br><br>
       <b>Na hora de fotografar:</b> fundo claro e uniforme • rosto centralizado no oval •
       boa iluminação • sem boné, óculos escuros ou máscara.
+    </div>
+  </div>
+
+  <div class="card" id="baseCard">
+    <div class="card-title">Base de colaboradores</div>
+    <div id="baseStatus" class="base-status"></div>
+    <div class="base-btns">
+      <label class="btn btn-outline btn-sm file-btn">📥 Importar ativos (CSV)
+        <input type="file" accept=".csv,text/csv" onchange="importarBase(this,'ativos')" hidden>
+      </label>
+      <label class="btn btn-outline btn-sm file-btn">🚫 Importar desligados (CSV)
+        <input type="file" accept=".csv,text/csv" onchange="importarBase(this,'desligados')" hidden>
+      </label>
+    </div>
+    <div class="dicas" style="margin-top:12px">
+      Exporte a base do RH como <b>CSV</b> (aba com colunas <b>Cadastro/Matrícula</b> e <b>Nome</b>) e importe aqui.
+      A matrícula é conferida nesta base antes de capturar. Desligados são só as matrículas (uma por linha).
     </div>
   </div>
 
@@ -163,6 +192,7 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
 <div id="prevScreen" class="cam hidden">
   <img id="prevImg" alt="Prévia da foto">
   <div class="prev-matricula"><small>MATRÍCULA</small><span id="prevMatricula"></span></div>
+  <div id="prevNome" style="color:#fff;font-weight:700;font-size:1rem;text-align:center;margin-top:4px"></div>
   <div class="badge-tamanho" id="prevTamanho"></div>
   <div class="prev-check">
     ✔️ A matrícula acima está correta?<br>
@@ -205,8 +235,12 @@ const HIST_CAP = 150;                       // máx. de registros no histórico 
 
 const K_CFG  = 'facial_config_v1';
 const K_HIST = 'facial_hist_v1';
+const K_BASE = 'facial_base_v1';   // { matricula: nome } dos ativos
+const K_DESL = 'facial_desl_v1';   // [ matricula, ... ] dos desligados
 const cfg    = () => JSON.parse(localStorage.getItem(K_CFG)  || '{}');
 const hist   = () => JSON.parse(localStorage.getItem(K_HIST) || '[]');
+const base   = () => JSON.parse(localStorage.getItem(K_BASE) || '{}');
+const desl   = () => JSON.parse(localStorage.getItem(K_DESL) || '[]');
 const saveCfg  = c => localStorage.setItem(K_CFG,  JSON.stringify(c));
 
 // Grava o histórico com proteção contra estouro de quota do localStorage:
@@ -240,6 +274,7 @@ const _LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADcAAAA7CAYAAAD
 
 let stream = null, camFacing = 'environment', fotoAtual = null;
 let matriculaCapturada = '';                  // matrícula congelada na abertura da câmera
+let nomeCapturado = '';                       // nome (da base) congelado na abertura da câmera
 let camGen = 0;                               // geração da câmera — invalida getUserMedia em voo
 let esperaInterval = null;                    // handle do polling do 1º frame
 const emVoo = new Set();                       // ids com POST em andamento (impede duplo envio)
@@ -274,6 +309,101 @@ function esc(s){
   return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
+/* ==================== base de colaboradores ==================== */
+// separa uma linha de CSV respeitando aspas; detecta ';' ou ',' pelo cabeçalho
+function parseCsv(texto){
+  texto = texto.replace(/^﻿/, '');                 // remove BOM
+  const linhas = texto.split(/\r?\n/).filter(l => l.trim() !== '');
+  if(!linhas.length) return [];
+  const delim = (linhas[0].split(';').length >= linhas[0].split(',').length) ? ';' : ',';
+  const parseLinha = l => {
+    const out = []; let cur = '', asp = false;
+    for(let i=0;i<l.length;i++){
+      const ch = l[i];
+      if(ch === '"'){ if(asp && l[i+1] === '"'){ cur+='"'; i++; } else asp = !asp; }
+      else if(ch === delim && !asp){ out.push(cur); cur=''; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  };
+  return linhas.map(parseLinha);
+}
+
+async function importarBase(input, tipo){
+  const file = input.files && input.files[0];
+  input.value = '';                                     // permite reimportar o mesmo arquivo
+  if(!file) return;
+  try{
+    const linhas = parseCsv(await file.text());
+    if(linhas.length < 1){ toast('CSV vazio.'); return; }
+    const cab = linhas[0].map(h => h.toLowerCase());
+    // acha a coluna da matrícula (Cadastro/Matrícula) e do nome
+    const iMat = cab.findIndex(h => h.includes('cadastro') || h.includes('matr'));
+    const iNome = cab.findIndex(h => h.includes('nome'));
+    const temCab = iMat !== -1;
+    const colMat = temCab ? iMat : 0;
+    const inicio = temCab ? 1 : 0;
+
+    if(tipo === 'ativos'){
+      if(iNome === -1 && temCab){ toast('⚠️ Não achei a coluna "Nome" no CSV.'); return; }
+      const mapa = {};
+      for(let i=inicio;i<linhas.length;i++){
+        const m = normalizaMatricula(linhas[i][colMat] || '');
+        const n = (iNome !== -1 ? linhas[i][iNome] : linhas[i][1]) || '';
+        if(m) mapa[m] = n;
+      }
+      localStorage.setItem(K_BASE, JSON.stringify(mapa));
+      toast(`✅ Base de ativos: ${Object.keys(mapa).length} colaboradores.`);
+    } else {
+      const lista = [];
+      for(let i=inicio;i<linhas.length;i++){
+        const m = normalizaMatricula(linhas[i][colMat] || '');
+        if(m) lista.push(m);
+      }
+      localStorage.setItem(K_DESL, JSON.stringify([...new Set(lista)]));
+      toast(`✅ Desligados: ${new Set(lista).size} matrículas.`);
+    }
+    renderBaseStatus(); atualizarLookup();
+  }catch(e){
+    toast('❌ Falha ao ler o CSV: ' + e.message, 4500);
+  }
+}
+
+// retorna { status, nome } para uma matrícula
+function lookupMatricula(matricula){
+  const m = normalizaMatricula(matricula);
+  if(!m) return { status:'vazio', nome:'' };
+  const b = base(); const temBase = Object.keys(b).length > 0;
+  if(desl().includes(m)) return { status:'desligado', nome: b[m] || '' };
+  if(!temBase) return { status:'sem_base', nome:'' };
+  if(b[m] != null) return { status:'ok', nome: b[m] };
+  return { status:'nao_encontrado', nome:'' };
+}
+
+function renderBaseStatus(){
+  const nA = Object.keys(base()).length, nD = desl().length;
+  const el = document.getElementById('baseStatus');
+  if(!el) return;
+  el.innerHTML = nA
+    ? `✅ <b>${nA}</b> ativos${nD ? ` · 🚫 <b>${nD}</b> desligados` : ''} carregados`
+    : `<span class="dim">Nenhuma base importada ainda — importe os ativos para conferir as matrículas.</span>`;
+}
+
+// atualiza o texto de conferência do nome enquanto digita a matrícula
+function atualizarLookup(){
+  const el = document.getElementById('nomeLookup');
+  const inp = document.getElementById('matricula');
+  if(!el || !inp) return;
+  const m = normalizaMatricula(inp.value);
+  if(!m){ el.textContent = ''; el.className = 'nome-lookup'; return; }
+  const r = lookupMatricula(m);
+  if(r.status === 'ok'){ el.textContent = '✔ ' + r.nome; el.className = 'nome-lookup ok'; }
+  else if(r.status === 'desligado'){ el.textContent = '⛔ DESLIGADO' + (r.nome ? ' — ' + r.nome : ''); el.className = 'nome-lookup err'; }
+  else if(r.status === 'nao_encontrado'){ el.textContent = '⚠️ Matrícula não encontrada na base de ativos'; el.className = 'nome-lookup warn'; }
+  else { el.textContent = ''; el.className = 'nome-lookup'; }   // sem_base: não polui
+}
+
 /* ==================== câmera ==================== */
 async function abrirCamera(){
   const matricula = normalizaMatricula(document.getElementById('matricula').value);
@@ -281,11 +411,23 @@ async function abrirCamera(){
   if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
   if(!cfg().endpoint){ toast('⚠️ Configure a URL do fluxo em ⚙️ antes de começar.'); abrirConfig(); return; }
 
+  // confere a matrícula na base de ativos antes de capturar
+  const r = lookupMatricula(matricula);
+  if(r.status === 'sem_base'){
+    if(!confirm('Nenhuma base de ativos foi importada, então não dá para conferir a matrícula.\nImporte a base em "Base de colaboradores". Deseja capturar mesmo assim?')) return;
+  } else if(r.status === 'desligado'){
+    if(!confirm(`⛔ ATENÇÃO: a matrícula ${matricula}${r.nome ? ' ('+r.nome+')' : ''} está na lista de DESLIGADOS.\nNão deveria ganhar acesso. Capturar mesmo assim?`)) return;
+  } else if(r.status === 'nao_encontrado'){
+    if(!confirm(`⚠️ A matrícula ${matricula} NÃO está na base de ativos.\nConfira se digitou certo. Capturar mesmo assim?`)) return;
+  }
+  const nomeConf = r.nome || '';
+
   const jaEnviado = hist().find(h => h.matricula === matricula && h.status === 'enviado');
   if(jaEnviado && !confirm(`Já existe foto enviada para a matrícula ${matricula} (em ${horaBr(jaEnviado.ts)}).\nUma nova captura vai substituir a linha na planilha. Continuar?`)) return;
 
   matriculaCapturada = matricula;                             // congela — não relê o input depois
-  document.getElementById('camMatricula').textContent = matricula;
+  nomeCapturado = nomeConf;                                   // nome congelado da base
+  document.getElementById('camMatricula').textContent = matricula + (nomeConf ? ' — ' + nomeConf.split(' ')[0] : '');
   document.getElementById('camScreen').classList.remove('hidden');
   await ligarStream();
 }
@@ -374,11 +516,13 @@ function capturar(){
   const foto = gerarFoto3x4(video, video.videoWidth, video.videoHeight);
   if(!foto){ toast('❌ Não foi possível ajustar a foto para 40 KB. Tente novamente.'); return; }
   foto.matricula = matriculaCapturada;        // congela a matrícula junto com a foto
+  foto.nome = nomeCapturado;                  // nome congelado da base
 
   fotoAtual = foto;
   fecharCamera();
   document.getElementById('prevImg').src = foto.dataUrl;
   document.getElementById('prevMatricula').textContent = foto.matricula;
+  document.getElementById('prevNome').textContent = foto.nome || '';
   document.getElementById('prevTamanho').textContent =
     `✔ 3x4 digital ${foto.w}×${foto.h} px • ${(foto.bytes/1024).toFixed(1)} KB (limite ${LIMITE_KB} KB)`;
   document.getElementById('btnConfirmar').textContent = `✅ Enviar matrícula ${foto.matricula}`;
@@ -470,6 +614,7 @@ async function enviar(id, recInline){
 
 function limparForm(){
   document.getElementById('matricula').value = '';
+  atualizarLookup();
   document.getElementById('matricula').focus();
 }
 
@@ -598,19 +743,20 @@ async function testarConexao(){
   if(mudou) saveHist(h);
 })();
 
-// sanitiza a matrícula em tempo real (só remove caracteres proibidos, preserva zeros à esquerda)
+// sanitiza a matrícula em tempo real e mostra o nome da base (conferência)
 (function(){
   const inp = document.getElementById('matricula');
   inp.addEventListener('input', () => {
     const limpo = normalizaMatricula(inp.value);
     if(limpo !== inp.value) inp.value = limpo;
+    atualizarLookup();
   });
 })();
 
 // pinta os logos do Grupo Maroni (barra, header de marca e rodapé)
 ['logoBar','logoBrand','logoFoot'].forEach(id => { const el = document.getElementById(id); if(el) el.src = _LOGO_SRC; });
 
-renderHist(); aplicarCfg();
+renderHist(); aplicarCfg(); renderBaseStatus();
 if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure a URL do fluxo.', 5000), 600);
 </script>
 </body>
