@@ -1,4 +1,11 @@
-# Publicar apenas o app. Guia e planilha modelo ficam locais / no SharePoint.
+# Publicar apenas o app (html). Guia, planilha e pacote do Teams ficam locais.
 Fotos Facial - Colaboradores.xlsx
 PASSO-A-PASSO-POWER-AUTOMATE.md
+FLUXO-POWER-AUTOMATE-COMPLETO.md
 *.xlsx
+# pacote do Teams (não é conteúdo web — é enviado ao Teams)
+manifest.json
+color.png
+outline.png
+*.zip
+*.csv

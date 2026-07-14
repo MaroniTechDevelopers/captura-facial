@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configurar — Captura Facial</title>
+<script src="https://res.cdn.office.net/teams-js/2.34.0/js/MicrosoftTeams.min.js"></script>
+<style>
+body{font-family:'Segoe UI',Arial,sans-serif;background:#111827;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:20px}
+.box{max-width:360px}
+.t{color:#f5c800;font-weight:800;font-size:1.1rem;margin-bottom:8px}
+.s{color:rgba(255,255,255,.7);font-size:.9rem;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="t">📸 Captura Facial</div>
+  <div class="s">Clique em <b>Salvar</b> para adicionar a aba de captura de fotos neste canal.</div>
+</div>
+<script>
+(function(){
+  var URL_APP = "https://maronitechdevelopers.github.io/captura-facial/index.html";
+  microsoftTeams.app.initialize().then(function(){
+    microsoftTeams.pages.config.registerOnSaveHandler(function(saveEvent){
+      microsoftTeams.pages.config.setConfig({
+        entityId: "capturaFacialTab",
+        contentUrl: URL_APP,
+        websiteUrl: "https://maronitechdevelopers.github.io/captura-facial/",
+        suggestedDisplayName: "Captura Facial"
+      }).then(function(){ saveEvent.notifySuccess(); })
+        .catch(function(){ saveEvent.notifyFailure("erro ao salvar configuração"); });
+    });
+    microsoftTeams.pages.config.setValidityState(true);
+  }).catch(function(e){ document.querySelector('.s').textContent = 'Abra esta página dentro do Microsoft Teams.'; });
+})();
+</script>
+</body>
+</html>

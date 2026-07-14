@@ -6,6 +6,8 @@
 <title>Captura Facial — Grupo Maroni</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<!-- SDK do Microsoft Teams (só é usada quando o app roda dentro do Teams; no navegador é ignorada) -->
+<script src="https://res.cdn.office.net/teams-js/2.34.0/js/MicrosoftTeams.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f0f2f5;min-height:100vh;color:#111827;-webkit-font-smoothing:antialiased}
@@ -275,6 +277,8 @@ const _LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADcAAAA7CAYAAAD
 let stream = null, camFacing = 'environment', fotoAtual = null;
 let matriculaCapturada = '';                  // matrícula congelada na abertura da câmera
 let nomeCapturado = '';                       // nome (da base) congelado na abertura da câmera
+let teamsInfo = { dentro:false, mobile:false, host:'browser' };  // ambiente detectado
+let teamsReady = null;                        // Promise da detecção do Teams
 let camGen = 0;                               // geração da câmera — invalida getUserMedia em voo
 let esperaInterval = null;                    // handle do polling do 1º frame
 const emVoo = new Set();                       // ids com POST em andamento (impede duplo envio)
@@ -404,6 +408,58 @@ function atualizarLookup(){
   else { el.textContent = ''; el.className = 'nome-lookup'; }   // sem_base: não polui
 }
 
+/* ==================== ambiente Teams ==================== */
+// Detecta se o app roda dentro do Microsoft Teams e em qual cliente.
+// No navegador comum, o initialize() não resolve → timeout → modo navegador.
+async function detectarTeams(){
+  if(typeof microsoftTeams === 'undefined') return teamsInfo;   // SDK não carregou (CDN bloqueado)
+  try{
+    await Promise.race([
+      microsoftTeams.app.initialize(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2500))
+    ]);
+    const ctx = await microsoftTeams.app.getContext();
+    const host = (ctx && ctx.app && ctx.app.host && ctx.app.host.clientType) || '';
+    teamsInfo = { dentro:true, mobile: host==='android' || host==='ios', host };
+  }catch(_){ /* navegador comum — mantém teamsInfo padrão */ }
+  return teamsInfo;
+}
+
+// Captura no Teams MOBILE (Android/iOS), onde getUserMedia é bloqueado no webview:
+// usa a API de mídia do Teams (câmera nativa) → processa em 3x4 ≤40KB → mostra preview.
+function capturarTeamsMobile(){
+  return new Promise((resolve) => {
+    try{
+      microsoftTeams.media.selectMedia({
+        mediaType: microsoftTeams.media.MediaType.Image,
+        maxMediaCount: 1,
+        imageProps: {
+          sources: [microsoftTeams.media.Source.Camera],   // só câmera (foto na hora, sem galeria)
+          startMode: microsoftTeams.media.CameraStartMode.Photo,
+          cameraSwitcher: true
+        }
+      }, (error, attachments) => {
+        if(error){ if(error.errorCode !== 4001) toast('Câmera: ' + (error.message || ('erro ' + error.errorCode)), 4500); return resolve(); }
+        if(!attachments || !attachments.length) return resolve();   // cancelado
+        attachments[0].getMedia((err, blob) => {
+          if(err || !blob){ toast('Falha ao obter a foto do Teams.'); return resolve(); }
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const foto = gerarFoto3x4(img, img.naturalWidth, img.naturalHeight);
+            if(!foto){ toast('❌ Não foi possível ajustar a foto para 40 KB. Tente de novo.'); return resolve(); }
+            exibirPreview(foto);
+            resolve();
+          };
+          img.onerror = () => { URL.revokeObjectURL(url); toast('Falha ao carregar a imagem.'); resolve(); };
+          img.src = url;
+        });
+      });
+    }catch(e){ toast('Câmera do Teams indisponível: ' + e.message, 4500); resolve(); }
+  });
+}
+
 /* ==================== câmera ==================== */
 async function abrirCamera(){
   const matricula = normalizaMatricula(document.getElementById('matricula').value);
@@ -427,6 +483,11 @@ async function abrirCamera(){
 
   matriculaCapturada = matricula;                             // congela — não relê o input depois
   nomeCapturado = nomeConf;                                   // nome congelado da base
+
+  // No Teams MOBILE o getUserMedia é bloqueado → usa a câmera nativa via SDK do Teams
+  await (teamsReady || Promise.resolve());
+  if(teamsInfo.mobile){ await capturarTeamsMobile(); return; }
+
   document.getElementById('camMatricula').textContent = matricula + (nomeConf ? ' — ' + nomeConf.split(' ')[0] : '');
   document.getElementById('camScreen').classList.remove('hidden');
   await ligarStream();
@@ -512,14 +573,18 @@ function gerarFoto3x4(source, sw, sh){
 function capturar(){
   const video = document.getElementById('video');
   if(!video.videoWidth){ toast('Câmera ainda carregando...'); return; }
-
   const foto = gerarFoto3x4(video, video.videoWidth, video.videoHeight);
   if(!foto){ toast('❌ Não foi possível ajustar a foto para 40 KB. Tente novamente.'); return; }
-  foto.matricula = matriculaCapturada;        // congela a matrícula junto com a foto
-  foto.nome = nomeCapturado;                  // nome congelado da base
-
-  fotoAtual = foto;
   fecharCamera();
+  exibirPreview(foto);
+}
+
+// Monta o fotoAtual (com matrícula/nome congelados) e mostra a tela de preview.
+// Usada pela câmera ao vivo (getUserMedia) e pela captura do Teams mobile (SDK).
+function exibirPreview(foto){
+  foto.matricula = matriculaCapturada;
+  foto.nome = nomeCapturado;
+  fotoAtual = foto;
   document.getElementById('prevImg').src = foto.dataUrl;
   document.getElementById('prevMatricula').textContent = foto.matricula;
   document.getElementById('prevNome').textContent = foto.nome || '';
@@ -532,6 +597,7 @@ function capturar(){
 function repetir(){
   document.getElementById('prevScreen').classList.add('hidden');
   fotoAtual = null;
+  if(teamsInfo.mobile){ capturarTeamsMobile(); return; }   // reabre a câmera nativa do Teams
   document.getElementById('camScreen').classList.remove('hidden');
   ligarStream();
 }
@@ -755,6 +821,9 @@ async function testarConexao(){
 
 // pinta os logos do Grupo Maroni (barra, header de marca e rodapé)
 ['logoBar','logoBrand','logoFoot'].forEach(id => { const el = document.getElementById(id); if(el) el.src = _LOGO_SRC; });
+
+// detecta o ambiente (Teams desktop/web/mobile ou navegador) já no carregamento
+teamsReady = detectarTeams();
 
 renderHist(); aplicarCfg(); renderBaseStatus();
 if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure a URL do fluxo.', 5000), 600);
