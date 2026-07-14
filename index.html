@@ -342,10 +342,10 @@ async function carregarBaseDoSharePoint(mostrar){
     const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listar' }) });
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    const lista = data.ativos || data.value || [];
+    const lista = Array.isArray(data) ? data : (data.ativos || data.value || []);
     const mapa = {};
     lista.forEach(x => {
-      const m = normalizaMatricula(x.matricula ?? x.Matricula ?? x.matrícula ?? '');
+      const m = normalizaMatricula(x.matricula ?? x.Matricula ?? x['Matrícula'] ?? x.cadastro ?? x.Cadastro ?? '');
       const n = x.nome ?? x.Nome ?? x.Nome_Usuario ?? '';
       if(m) mapa[m] = n;
     });
