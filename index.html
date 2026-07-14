@@ -520,7 +520,9 @@ async function ligarStream(){
   btn.disabled = true;
   try{
     const s = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: camFacing, width:{ideal:1920}, height:{ideal:1440} },
+      // 'environment' = câmera TRASEIRA (padrão). 'ideal' garante a traseira no celular
+      // e ainda funciona no desktop que só tem webcam frontal (cai para a disponível).
+      video: { facingMode: { ideal: camFacing }, width:{ideal:1920}, height:{ideal:1440} },
       audio: false
     });
     // se a câmera foi fechada/trocada enquanto getUserMedia resolvia, descarta este stream
