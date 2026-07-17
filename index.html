@@ -34,8 +34,9 @@ body{font-family:'Inter','Segoe UI',Arial,sans-serif;background:#f0f2f5;min-heig
 .card-title{font-size:.93rem;font-weight:700;margin-bottom:16px;color:#111827;display:flex;align-items:center;justify-content:space-between}
 
 label{display:block;font-size:.76rem;font-weight:600;color:#374151;margin:12px 0 5px}
-input{width:100%;padding:11px 12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:.95rem;font-family:inherit;background:#fff}
-input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,0,.18)}
+input,select{width:100%;padding:11px 12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:.95rem;font-family:inherit;background:#fff;color:#111827}
+input:focus,select:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,0,.18)}
+select.sem-grupo{border-color:#f5c800;background:#fffbe6}
 .input-matricula{font-size:1.5rem;font-weight:700;text-align:center;letter-spacing:.12em;padding:14px}
 
 .btn{border:none;border-radius:10px;padding:12px 18px;font-size:.9rem;font-weight:700;font-family:inherit;cursor:pointer;transition:all .15s}
@@ -136,6 +137,8 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
     <label>Matrícula do colaborador *</label>
     <input id="matricula" class="input-matricula" inputmode="numeric" placeholder="0000" autocomplete="off">
     <div id="nomeLookup" class="nome-lookup"></div>
+    <label>Grupo de acesso no InControl *</label>
+    <select id="grupo"></select>
     <button class="btn btn-yellow btn-block" onclick="abrirCamera()">📷 Capturar foto</button>
     <div class="dicas">
       <b>Confira a matrícula com atenção</b> — o nome aparece aqui pela base do RH.<br><br>
@@ -198,6 +201,7 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
   <img id="prevImg" alt="Prévia da foto">
   <div class="prev-matricula"><small>MATRÍCULA</small><span id="prevMatricula"></span></div>
   <div id="prevNome" style="color:#fff;font-weight:700;font-size:1rem;text-align:center;margin-top:4px"></div>
+  <div id="prevGrupo" style="color:#f5c800;font-weight:600;font-size:.82rem;text-align:center;margin-top:4px"></div>
   <div class="badge-tamanho" id="prevTamanho"></div>
   <div class="prev-check">
     ✔️ A matrícula acima está correta?<br>
@@ -219,6 +223,8 @@ input:focus{outline:none;border-color:#f5c800;box-shadow:0 0 0 3px rgba(245,200,
     <input id="cfgEndpoint" placeholder="https://prod-XX.brazilsouth.logic.azure.com/...">
     <label>URL do Fluxo — base de ativos (listar/adicionar)</label>
     <input id="cfgBase" placeholder="https://prod-XX...  (fluxo Base Ativos — App)">
+    <label>Grupos do InControl (separados por vírgula)</label>
+    <input id="cfgGrupos" placeholder="Administrativo, Operacional, Portaria...">
     <label>Link da planilha no SharePoint (opcional)</label>
     <input id="cfgExcel" placeholder="https://grupotransmaroni.sharepoint.com/...">
     <div class="m-foot">
@@ -240,10 +246,25 @@ const LIMITE_BYTES = LIMITE_KB * 1024;
 const FOTO_W = 354, FOTO_H = 472;           // 3x4 digital (3cm×4cm em 300 dpi)
 const HIST_CAP = 150;                       // máx. de registros no histórico do aparelho
 
-const K_CFG  = 'facial_config_v1';
-const K_HIST = 'facial_hist_v1';
-const K_BASE = 'facial_base_v1';   // { matricula: nome } dos ativos (puxada do SharePoint)
-const cfg    = () => JSON.parse(localStorage.getItem(K_CFG)  || '{}');
+/* CONFIGURAÇÃO PADRÃO EMBUTIDA — preencha as URLs dos fluxos aqui e todo dispositivo
+   novo já abre configurado, sem digitar nada. O ⚙️ continua podendo sobrescrever. */
+const DEFAULT_CFG = {
+  endpoint:     '',   // URL do Fluxo 1 — "Foto Facial — Captura App"
+  baseEndpoint: '',   // URL do Fluxo 2 — "Base — App"
+  excelUrl:     '',   // link da planilha no SharePoint (opcional)
+  grupos:       'Administrativo'   // grupos do InControl, separados por vírgula
+};
+
+const K_CFG   = 'facial_config_v1';
+const K_HIST  = 'facial_hist_v1';
+const K_BASE  = 'facial_base_v1';   // { matricula: nome } dos ativos (puxada do SharePoint)
+const K_GRUPO = 'facial_grupo_v1';  // último grupo usado (pré-seleção)
+function cfg(){
+  const s = JSON.parse(localStorage.getItem(K_CFG) || '{}');
+  const o = { ...DEFAULT_CFG };
+  for(const k in s) if(s[k]) o[k] = s[k];   // o salvo no aparelho sobrepõe o padrão
+  return o;
+}
 const hist   = () => JSON.parse(localStorage.getItem(K_HIST) || '[]');
 const base   = () => JSON.parse(localStorage.getItem(K_BASE) || '{}');
 const saveCfg  = c => localStorage.setItem(K_CFG,  JSON.stringify(c));
@@ -280,6 +301,7 @@ const _LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADcAAAA7CAYAAAD
 let stream = null, camFacing = 'environment', fotoAtual = null;
 let matriculaCapturada = '';                  // matrícula congelada na abertura da câmera
 let nomeCapturado = '';                       // nome (da base) congelado na abertura da câmera
+let grupoCapturado = '';                      // grupo do InControl congelado na abertura da câmera
 let teamsInfo = { dentro:false, mobile:false, host:'browser' };  // ambiente detectado
 let teamsReady = null;                        // Promise da detecção do Teams
 let camGen = 0;                               // geração da câmera — invalida getUserMedia em voo
@@ -456,6 +478,22 @@ function renderBaseStatus(){
     : `<span class="dim">Base não carregada — toque em "Atualizar base" (ou configure a URL da base em ⚙️).</span>`;
 }
 
+// Preenche o seletor de grupo com a lista configurada (⚙️ ou padrão embutido)
+// e pré-seleciona o último grupo usado neste aparelho.
+function popularGrupos(){
+  const sel = document.getElementById('grupo');
+  if(!sel) return;
+  const lista = (cfg().grupos || '').split(',').map(s => s.trim()).filter(Boolean);
+  const ultimo = localStorage.getItem(K_GRUPO) || '';
+  sel.innerHTML = '<option value="">— selecione o grupo —</option>' +
+    lista.map(g => `<option value="${esc(g)}"${g === ultimo ? ' selected' : ''}>${esc(g)}</option>`).join('');
+  sel.classList.toggle('sem-grupo', !sel.value);
+  sel.onchange = () => {
+    if(sel.value) localStorage.setItem(K_GRUPO, sel.value);
+    sel.classList.toggle('sem-grupo', !sel.value);
+  };
+}
+
 // atualiza o texto de conferência do nome enquanto digita a matrícula
 function atualizarLookup(){
   const el = document.getElementById('nomeLookup');
@@ -526,6 +564,8 @@ async function abrirCamera(){
   const matricula = normalizaMatricula(document.getElementById('matricula').value);
   document.getElementById('matricula').value = matricula;     // reflete a limpeza na tela
   if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
+  const grupoSel = document.getElementById('grupo').value;
+  if(!grupoSel){ toast('⚠️ Selecione o GRUPO de acesso do InControl antes de fotografar.'); document.getElementById('grupo').focus(); return; }
   if(!cfg().endpoint){ toast('⚠️ Configure a URL do fluxo em ⚙️ antes de começar.'); abrirConfig(); return; }
 
   // confere a matrícula na base de ativos (puxada do SharePoint) antes de capturar
@@ -542,6 +582,7 @@ async function abrirCamera(){
 
   matriculaCapturada = matricula;                             // congela — não relê o input depois
   nomeCapturado = nomeConf;                                   // nome congelado da base
+  grupoCapturado = grupoSel;                                  // grupo congelado do seletor
 
   // No Teams MOBILE o getUserMedia é bloqueado → usa a câmera nativa via SDK do Teams
   await (teamsReady || Promise.resolve());
@@ -645,10 +686,12 @@ function capturar(){
 function exibirPreview(foto){
   foto.matricula = matriculaCapturada;
   foto.nome = nomeCapturado;
+  foto.grupo = grupoCapturado;
   fotoAtual = foto;
   document.getElementById('prevImg').src = foto.dataUrl;
   document.getElementById('prevMatricula').textContent = foto.matricula;
   document.getElementById('prevNome').textContent = foto.nome || '';
+  document.getElementById('prevGrupo').textContent = foto.grupo ? '🔑 Grupo: ' + foto.grupo : '';
   document.getElementById('prevTamanho').textContent =
     `✔ 3x4 digital ${foto.w}×${foto.h} px • ${(foto.bytes/1024).toFixed(1)} KB (limite ${LIMITE_KB} KB)`;
   document.getElementById('btnConfirmar').textContent = `✅ Enviar matrícula ${foto.matricula}`;
@@ -672,17 +715,20 @@ async function confirmarEnvio(){
   }
   const matricula = fotoAtual.matricula;
   if(!matricula){ toast('❌ Matrícula ausente. Refaça a captura.'); return; }
+  const grupo = fotoAtual.grupo || '';
+  if(!grupo){ toast('❌ Grupo ausente. Refaça a captura.'); return; }
   document.getElementById('prevScreen').classList.add('hidden');
 
   const payload = {
     matricula,
+    grupo,
     timestamp: new Date().toISOString(),
     arquivo  : `${matricula}_${stampArquivo()}.jpg`,
     foto     : fotoAtual.dataUrl.split(',')[1]   // base64 puro, sem prefixo
   };
 
   const rec = {
-    id: Date.now(), matricula,
+    id: Date.now(), matricula, grupo,
     ts: payload.timestamp, status: 'enviando',
     thumb: fotoAtual.thumb, kb: +(fotoAtual.bytes/1024).toFixed(1),
     link: '', erroMsg: '', payload
@@ -767,7 +813,7 @@ function renderHist(){
       <img class="hist-thumb" src="${r.thumb||''}" alt="">
       <div class="hist-info">
         <div class="hist-nome">Matrícula ${esc(r.matricula)}</div>
-        <div class="hist-meta">${horaBr(r.ts)}${detalhe}</div>
+        <div class="hist-meta">${horaBr(r.ts)}${r.grupo ? ' • ' + esc(r.grupo) : ''}${detalhe}</div>
         ${chip}
       </div>
       <div class="hist-actions">${acoes}</div>
@@ -793,6 +839,7 @@ function abrirExcel(){
 function abrirConfig(){
   document.getElementById('cfgEndpoint').value = cfg().endpoint || '';
   document.getElementById('cfgBase').value = cfg().baseEndpoint || '';
+  document.getElementById('cfgGrupos').value = cfg().grupos || '';
   document.getElementById('cfgExcel').value = cfg().excelUrl || '';
   document.getElementById('modalCfg').classList.remove('hidden');
 }
@@ -801,8 +848,9 @@ function salvarConfig(){
   const baseAntes = cfg().baseEndpoint || '';
   saveCfg({ endpoint: document.getElementById('cfgEndpoint').value.trim(),
             baseEndpoint: document.getElementById('cfgBase').value.trim(),
+            grupos: document.getElementById('cfgGrupos').value.trim(),
             excelUrl: document.getElementById('cfgExcel').value.trim() });
-  fecharConfig(); aplicarCfg(); toast('✅ Configurações salvas.');
+  fecharConfig(); aplicarCfg(); popularGrupos(); toast('✅ Configurações salvas.');
   if(cfg().baseEndpoint && cfg().baseEndpoint !== baseAntes) carregarBaseDoSharePoint(true);
 }
 function aplicarCfg(){
@@ -816,9 +864,11 @@ function copiarLinkConfig(){
   const endpoint = document.getElementById('cfgEndpoint').value.trim();
   if(!endpoint){ toast('Informe a URL do fluxo primeiro.'); return; }
   const baseEp = document.getElementById('cfgBase').value.trim();
+  const grupos = document.getElementById('cfgGrupos').value.trim();
   const excel = document.getElementById('cfgExcel').value.trim();
   let url = location.origin + location.pathname + '?endpoint=' + encodeURIComponent(endpoint);
   if(baseEp) url += '&base=' + encodeURIComponent(baseEp);
+  if(grupos) url += '&grupos=' + encodeURIComponent(grupos);
   if(excel) url += '&excel=' + encodeURIComponent(excel);
   navigator.clipboard.writeText(url)
     .then(()=>toast('📲 Link copiado! Envie ao outro operador — ao abrir, o app já fica configurado.', 5000))
@@ -840,6 +890,7 @@ async function testarConexao(){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         matricula:'00000',
+        grupo:'TESTE',
         timestamp:new Date().toISOString(),
         arquivo:`00000_${stampArquivo()}.jpg`,
         foto: teste.dataUrl.split(',')[1]
@@ -858,6 +909,7 @@ async function testarConexao(){
   if(p.get('endpoint')){
     saveCfg({ endpoint: p.get('endpoint'),
               baseEndpoint: p.get('base') || cfg().baseEndpoint || '',
+              grupos: p.get('grupos') || cfg().grupos || '',
               excelUrl: p.get('excel') || cfg().excelUrl || '' });
     history.replaceState({}, '', location.pathname);
     setTimeout(()=>toast('✅ App configurado automaticamente pelo link!', 4500), 400);
@@ -894,7 +946,7 @@ async function testarConexao(){
 // detecta o ambiente (Teams desktop/web/mobile ou navegador) já no carregamento
 teamsReady = detectarTeams();
 
-renderHist(); aplicarCfg(); renderBaseStatus();
+renderHist(); aplicarCfg(); renderBaseStatus(); popularGrupos();
 // puxa a base de ativos do SharePoint ao abrir (se a URL da base estiver configurada)
 if(cfg().baseEndpoint) carregarBaseDoSharePoint(false);
 if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure as URLs em ⚙️.', 5000), 600);
