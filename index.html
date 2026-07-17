@@ -103,6 +103,14 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
 .modal .sub{font-size:.76rem;color:#6b7280;line-height:1.5}
 .m-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 
+/* ---------- grupos (dispositivos + gestão) ---------- */
+.grupo-disp{font-size:.74rem;color:#6b7280;margin-top:6px;min-height:16px;font-weight:500}
+.grp-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:10px;margin-bottom:8px}
+.grp-info{flex:1;min-width:0}
+.grp-nome{font-size:.86rem;font-weight:700;color:#111827}
+.grp-devs{font-size:.72rem;color:#6b7280;margin-top:2px;word-break:break-word}
+.grp-acoes{display:flex;gap:6px;flex-shrink:0}
+
 /* ---------- login (mesmo visual do app de Treinamentos G&D) ---------- */
 .login-wrap{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(145deg,#f0f2f5 0%,#e8eaed 100%)}
 .login-card{background:#fff;border-radius:18px;width:100%;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,.1),0 0 0 1px rgba(0,0,0,.05);overflow:hidden}
@@ -185,6 +193,7 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
     <div id="nomeLookup" class="nome-lookup"></div>
     <label>Grupo de acesso no InControl *</label>
     <select id="grupo"></select>
+    <div id="grupoDisp" class="grupo-disp"></div>
     <button class="btn btn-yellow btn-block" onclick="abrirCamera()">📷 Capturar foto</button>
     <div class="dicas">
       <b>Confira a matrícula com atenção</b> — o nome aparece aqui pela base do RH.<br><br>
@@ -274,10 +283,31 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
     <label>Link da planilha no SharePoint (opcional)</label>
     <input id="cfgExcel" placeholder="https://grupotransmaroni.sharepoint.com/...">
     <div class="m-foot">
+      <button class="btn btn-outline btn-sm" onclick="abrirGrupos()">🔑 Gerenciar grupos</button>
       <button class="btn btn-outline btn-sm" onclick="copiarLinkConfig()">📲 Copiar link de configuração</button>
       <button class="btn btn-outline btn-sm" onclick="testarConexao()">🔌 Testar conexão</button>
       <button class="btn btn-outline btn-sm" onclick="fecharConfig()">Cancelar</button>
       <button class="btn btn-dark btn-sm" onclick="salvarConfig()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL GRUPOS (Admin) ============ -->
+<div id="modalGrupos" class="modal-bg hidden">
+  <div class="modal">
+    <h3>🔑 Grupos de acesso (InControl)</h3>
+    <p class="sub">Cada grupo lista os <b>dispositivos</b> (portas/leitores) que ele libera. Fica salvo na
+    planilha central do SharePoint — vale para todos os aparelhos na hora. O CSV de importação leva só o
+    nome do grupo; o vínculo real grupo→dispositivos é configurado dentro do InControl (isto aqui é a
+    referência oficial para os operadores).</p>
+    <div id="grpLista" style="margin-top:14px"></div>
+    <label id="grpFormTitulo">Novo grupo</label>
+    <input id="grpNome" placeholder="Nome do grupo (idêntico ao InControl)" autocomplete="off">
+    <label>Dispositivos que esse grupo libera</label>
+    <input id="grpDisp" placeholder="Ex.: Catraca Entrada, Porta RH, Refeitório" autocomplete="off">
+    <div class="m-foot">
+      <button class="btn btn-dark btn-sm" id="grpSalvarBtn" onclick="salvarGrupo()">➕ Adicionar grupo</button>
+      <button class="btn btn-outline btn-sm" onclick="fecharGrupos()">Fechar</button>
     </div>
   </div>
 </div>
@@ -314,8 +344,17 @@ const NIVEL_LABEL = { admin: 'Administrador', gestor: 'Gestor · Facilities', op
 const K_CFG   = 'facial_config_v1';
 const K_HIST  = 'facial_hist_v1';
 const K_BASE  = 'facial_base_v1';   // { matricula: nome } dos ativos (puxada do SharePoint)
-const K_GRUPO = 'facial_grupo_v1';  // último grupo usado (pré-seleção)
-const K_USER  = 'facial_user_v1';   // sessão do usuário logado neste aparelho
+const K_GRUPO  = 'facial_grupo_v1';   // último grupo usado (pré-seleção)
+const K_GRUPOS = 'facial_grupos_v1';  // [{grupo, dispositivos}] — cadastro central (SharePoint)
+const K_USER   = 'facial_user_v1';    // sessão do usuário logado neste aparelho
+const gruposCentrais = () => JSON.parse(localStorage.getItem(K_GRUPOS) || '[]');
+// lista efetiva de grupos: o cadastro central; se vazio, cai para o texto do ⚙️ (grupos separados por vírgula)
+function listaGrupos(){
+  const c = gruposCentrais();
+  if(c.length) return c;
+  return (cfg().grupos || '').split(',').map(s => s.trim()).filter(Boolean)
+         .map(g => ({ grupo: g, dispositivos: '' }));
+}
 
 const usuarioAtual = () => JSON.parse(localStorage.getItem(K_USER) || 'null');
 // central de permissões por nível
@@ -567,20 +606,143 @@ function renderBaseStatus(){
     : `<span class="dim">Base não carregada — toque em "Atualizar base" (ou configure a URL da base em ⚙️).</span>`;
 }
 
-// Preenche o seletor de grupo com a lista configurada (⚙️ ou padrão embutido)
-// e pré-seleciona o último grupo usado neste aparelho.
+// Preenche o seletor de grupo (cadastro central do SharePoint; fallback = ⚙️),
+// pré-seleciona o último usado e mostra os DISPOSITIVOS do grupo escolhido.
 function popularGrupos(){
   const sel = document.getElementById('grupo');
   if(!sel) return;
-  const lista = (cfg().grupos || '').split(',').map(s => s.trim()).filter(Boolean);
+  const lista = listaGrupos();
   const ultimo = localStorage.getItem(K_GRUPO) || '';
   sel.innerHTML = '<option value="">— selecione o grupo —</option>' +
-    lista.map(g => `<option value="${esc(g)}"${g === ultimo ? ' selected' : ''}>${esc(g)}</option>`).join('');
+    lista.map(g => `<option value="${esc(g.grupo)}"${g.grupo === ultimo ? ' selected' : ''}>${esc(g.grupo)}</option>`).join('');
   sel.classList.toggle('sem-grupo', !sel.value);
+  const mostraDisp = () => {
+    const g = lista.find(x => x.grupo === sel.value);
+    const el = document.getElementById('grupoDisp');
+    if(el) el.textContent = (g && g.dispositivos) ? '🚪 Libera: ' + g.dispositivos : '';
+  };
   sel.onchange = () => {
     if(sel.value) localStorage.setItem(K_GRUPO, sel.value);
     sel.classList.toggle('sem-grupo', !sel.value);
+    mostraDisp();
   };
+  mostraDisp();
+}
+
+// Puxa o cadastro central de grupos (tabela Grupos) via fluxo Base (ação listarGrupos).
+// Tolerante: se o fluxo ainda não tiver o caso listarGrupos, mantém o fallback do ⚙️.
+async function carregarGrupos(mostrar){
+  const url = cfg().baseEndpoint;
+  if(!url){ if(mostrar) toast('⚠️ Configure a URL do fluxo da base em ⚙️.'); return false; }
+  try{
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listarGrupos' }) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const lista = Array.isArray(data) ? data : (data.grupos || data.value || []);
+    const arr = lista.map(x => ({
+      grupo: String(x.grupo ?? x.Grupo ?? '').trim(),
+      dispositivos: String(x.dispositivos ?? x.Dispositivos ?? '').trim()
+    })).filter(g => g.grupo);
+    if(arr.length){ localStorage.setItem(K_GRUPOS, JSON.stringify(arr)); popularGrupos(); }
+    if(mostrar) toast(`✅ ${arr.length} grupo(s) carregados.`);
+    return true;
+  }catch(e){
+    if(mostrar) toast('❌ Falha ao carregar grupos: ' + e.message, 4500);
+    return false;
+  }
+}
+
+/* ---------- gestão de grupos (Admin) ---------- */
+let grupoEditando = null;   // nome do grupo em edição (null = criando novo)
+
+function abrirGrupos(){
+  if(!pode('config')){ toast('🔒 Somente o ADMINISTRADOR gerencia grupos.'); return; }
+  grupoEditando = null;
+  document.getElementById('grpNome').value = '';
+  document.getElementById('grpDisp').value = '';
+  document.getElementById('grpFormTitulo').textContent = 'Novo grupo';
+  document.getElementById('grpSalvarBtn').textContent = '➕ Adicionar grupo';
+  renderGrupos();
+  document.getElementById('modalGrupos').classList.remove('hidden');
+  carregarGrupos(false).then(renderGrupos);          // atualiza do SharePoint em segundo plano
+}
+function fecharGrupos(){ document.getElementById('modalGrupos').classList.add('hidden'); }
+
+function renderGrupos(){
+  const el = document.getElementById('grpLista');
+  if(!el) return;
+  const lista = gruposCentrais();
+  el.innerHTML = lista.length ? lista.map((g,i) => `
+    <div class="grp-item">
+      <div class="grp-info">
+        <div class="grp-nome">${esc(g.grupo)}</div>
+        <div class="grp-devs">${g.dispositivos ? '🚪 ' + esc(g.dispositivos) : '<i>sem dispositivos cadastrados</i>'}</div>
+      </div>
+      <div class="grp-acoes">
+        <button class="btn btn-outline btn-sm" onclick="editarGrupo(${i})">✏️</button>
+        <button class="btn btn-outline btn-sm" onclick="removerGrupo(${i})">🗑️</button>
+      </div>
+    </div>`).join('')
+    : '<div class="empty">Nenhum grupo no cadastro central ainda — adicione abaixo.</div>';
+}
+
+function editarGrupo(i){
+  const g = gruposCentrais()[i];
+  if(!g) return;
+  grupoEditando = g.grupo;
+  document.getElementById('grpNome').value = g.grupo;
+  document.getElementById('grpDisp').value = g.dispositivos;
+  document.getElementById('grpFormTitulo').textContent = 'Editando: ' + g.grupo;
+  document.getElementById('grpSalvarBtn').textContent = '💾 Salvar alterações';
+}
+
+async function salvarGrupo(){
+  if(!pode('config')) return;
+  const nome = document.getElementById('grpNome').value.trim();
+  const disp = document.getElementById('grpDisp').value.trim();
+  if(!nome){ toast('Informe o nome do grupo.'); return; }
+  const existe = gruposCentrais().some(g => g.grupo.toLowerCase() === nome.toLowerCase());
+  const editando = !!grupoEditando;
+  if(!editando && existe){ toast('⚠️ Esse grupo já existe — use o ✏️ para editar.'); return; }
+  if(editando && grupoEditando.toLowerCase() !== nome.toLowerCase()){
+    toast('⚠️ Para renomear, remova o grupo e crie de novo (o nome é a chave na planilha).', 5000); return;
+  }
+  try{
+    toast('⏳ Salvando grupo...');
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao: editando ? 'atualizarGrupo' : 'adicionarGrupo', grupo: nome, dispositivos: disp })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    await carregarGrupos(false);
+    grupoEditando = null;
+    document.getElementById('grpNome').value = '';
+    document.getElementById('grpDisp').value = '';
+    document.getElementById('grpFormTitulo').textContent = 'Novo grupo';
+    document.getElementById('grpSalvarBtn').textContent = '➕ Adicionar grupo';
+    renderGrupos();
+    toast(`✅ Grupo "${nome}" salvo na planilha central.`);
+  }catch(e){ toast('❌ Falha ao salvar grupo: ' + e.message, 4500); }
+}
+
+async function removerGrupo(i){
+  if(!pode('config')) return;
+  const g = gruposCentrais()[i];
+  if(!g) return;
+  if(!confirm(`Remover o grupo "${g.grupo}" do cadastro?\n(Não altera quem já foi capturado com ele — só sai da lista de seleção.)`)) return;
+  try{
+    toast('⏳ Removendo...');
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao:'removerGrupo', grupo: g.grupo })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const restante = gruposCentrais().filter(x => x.grupo !== g.grupo);
+    localStorage.setItem(K_GRUPOS, JSON.stringify(restante));   // reflete já; re-sincroniza abaixo
+    await carregarGrupos(false);
+    renderGrupos(); popularGrupos();
+    toast(`✅ Grupo "${g.grupo}" removido.`);
+  }catch(e){ toast('❌ Falha ao remover grupo: ' + e.message, 4500); }
 }
 
 // atualiza o texto de conferência do nome enquanto digita a matrícula
@@ -1000,7 +1162,7 @@ function salvarConfig(){
             grupos: document.getElementById('cfgGrupos').value.trim(),
             excelUrl: document.getElementById('cfgExcel').value.trim() });
   fecharConfig(); aplicarCfg(); popularGrupos(); toast('✅ Configurações salvas.');
-  if(cfg().baseEndpoint && cfg().baseEndpoint !== baseAntes) carregarBaseDoSharePoint(true);
+  if(cfg().baseEndpoint && cfg().baseEndpoint !== baseAntes){ carregarBaseDoSharePoint(true); carregarGrupos(false); }
 }
 function aplicarCfg(){
   document.getElementById('btnExcel').style.display = cfg().excelUrl ? '' : 'none';
@@ -1103,8 +1265,8 @@ teamsReady = detectarTeams();
 renderHist(); aplicarCfg(); renderBaseStatus(); popularGrupos(); aplicarPermissoes();
 // exige login se não houver sessão neste aparelho
 if(!usuarioAtual()) mostrarLogin();
-// puxa a base de ativos do SharePoint ao abrir (se a URL da base estiver configurada)
-if(cfg().baseEndpoint) carregarBaseDoSharePoint(false);
+// puxa a base de ativos e o cadastro de grupos do SharePoint ao abrir
+if(cfg().baseEndpoint){ carregarBaseDoSharePoint(false); carregarGrupos(false); }
 if(!cfg().endpoint && usuarioAtual() && pode('config'))
   setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure as URLs.', 5000), 600);
 </script>
