@@ -360,9 +360,10 @@ function parseCsv(texto){
 }
 
 // Puxa a base de ATIVOS da planilha no SharePoint (via fluxo "Base Ativos — App", ação listar).
+// Retorna true se conseguiu consultar (mesmo que venha vazia); false se a consulta falhou.
 async function carregarBaseDoSharePoint(mostrar){
   const url = cfg().baseEndpoint;
-  if(!url){ if(mostrar) toast('⚠️ Configure a URL do fluxo da base em ⚙️.'); return; }
+  if(!url){ if(mostrar) toast('⚠️ Configure a URL do fluxo da base em ⚙️.'); return false; }
   if(mostrar) toast('🔄 Atualizando base do SharePoint...');
   try{
     const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listar' }) });
@@ -378,8 +379,10 @@ async function carregarBaseDoSharePoint(mostrar){
     localStorage.setItem(K_BASE, JSON.stringify(mapa));
     renderBaseStatus(); atualizarLookup();
     if(mostrar) toast(`✅ Base atualizada: ${Object.keys(mapa).length} ativos.`);
+    return true;
   }catch(e){
     if(mostrar) toast('❌ Falha ao atualizar a base: ' + e.message, 4500);
+    return false;
   }
 }
 
@@ -401,22 +404,38 @@ async function importarBase(input){
     const inicio = temCab ? 1 : 0;
     if(iNome === -1 && temCab){ toast('⚠️ Não achei a coluna "Nome" no CSV.'); return; }
 
-    const jaTem = base();
-    const novos = [];
+    // monta os candidatos do CSV, sem repetição interna
+    const candidatos = new Map();
     for(let i=inicio;i<linhas.length;i++){
       const m = normalizaMatricula(linhas[i][colMat] || '');
       const n = (iNome !== -1 ? linhas[i][iNome] : linhas[i][1]) || '';
-      if(m && jaTem[m] == null) novos.push({ matricula:m, nome:n });   // só quem ainda não está na base
+      if(m && !candidatos.has(m)) candidatos.set(m, n);
     }
-    if(!novos.length){ toast('Nenhum ativo novo no CSV (todos já estão na base).'); return; }
+    if(!candidatos.size){ toast('Nenhuma matrícula encontrada no CSV.'); return; }
 
-    toast(`⏳ Enviando ${novos.length} novo(s) ativo(s) ao SharePoint...`);
+    // ANTI-DUPLICAÇÃO: re-consulta a base ATUAL no SharePoint antes de comparar.
+    // Se a consulta falhar, cancela — nunca envia às cegas.
+    toast('🔎 Conferindo a base atual no SharePoint...');
+    const okPull = await carregarBaseDoSharePoint(false);
+    if(!okPull){ toast('❌ Não consegui consultar a base atual — importação CANCELADA para não duplicar. Tente de novo.', 5500); return; }
+
+    const jaTem = base();
+    const novos = [...candidatos].filter(([m]) => jaTem[m] == null)
+                                 .map(([matricula, nome]) => ({ matricula, nome }));
+    const jaExistiam = candidatos.size - novos.length;
+    if(!novos.length){ toast(`✅ Nenhum ativo novo: os ${candidatos.size} do CSV já estão na base.`, 4500); return; }
+
+    // trava extra: base veio vazia mas o CSV é grande → provável falha de leitura, confirmar
+    if(Object.keys(jaTem).length === 0 &&
+       !confirm(`A base atual do SharePoint retornou VAZIA.\nSe a planilha já tiver colaboradores, importar agora pode DUPLICAR.\n\nEnviar ${novos.length} ativo(s) mesmo assim?`)) return;
+
+    toast(`⏳ Enviando ${novos.length} novo(s) ativo(s)${jaExistiam ? ` — ${jaExistiam} já existiam (ignorados)` : ''}...`);
     const r = await fetch(cfg().baseEndpoint, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ acao:'adicionar', ativos: novos })
     });
     if(!r.ok) throw new Error('HTTP ' + r.status);
-    toast(`✅ ${novos.length} ativo(s) adicionado(s) à base central.`);
+    toast(`✅ ${novos.length} adicionado(s)${jaExistiam ? ` · ${jaExistiam} já existiam (não reenviados)` : ''}.`, 5000);
     await carregarBaseDoSharePoint(false);              // re-puxa já com os novos
   }catch(e){
     toast('❌ Falha ao importar novos ativos: ' + e.message, 4500);
