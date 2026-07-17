@@ -103,6 +103,21 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
 .modal .sub{font-size:.76rem;color:#6b7280;line-height:1.5}
 .m-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 
+/* ---------- login (mesmo visual do app de Treinamentos G&D) ---------- */
+.login-wrap{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(145deg,#f0f2f5 0%,#e8eaed 100%)}
+.login-card{background:#fff;border-radius:18px;width:100%;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,.1),0 0 0 1px rgba(0,0,0,.05);overflow:hidden}
+.login-head{background:#111827;padding:22px 24px 20px;display:flex;align-items:center;gap:12px}
+.login-body{padding:22px 24px 26px}
+.login-lbl{font-size:.7rem;color:#9ca3af;margin-bottom:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.g-item{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:10px;cursor:pointer;transition:background .15s;margin-bottom:5px;border:1.5px solid transparent}
+.g-item:hover{background:#fffbeb;border-color:#f5c800}
+.g-av{width:38px;height:38px;border-radius:50%;background:#111827;color:#f5c800;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:800;flex-shrink:0}
+.g-nome{font-weight:700;font-size:.87rem;color:#111827}
+.g-sub{font-size:.71rem;color:#9ca3af}
+.user-chip{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);padding:4px 10px;border-radius:20px;font-size:.75rem;color:#fff;cursor:pointer;transition:background .15s}
+.user-chip:hover{background:rgba(255,255,255,.14)}
+.av{width:26px;height:26px;border-radius:50%;background:#f5c800;color:#111827;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:800;flex-shrink:0}
+
 /* ---------- toast (idêntico ao app de Treinamentos G&D) ---------- */
 #toast{position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:12px 18px;border-radius:12px;font-size:.83rem;font-weight:500;opacity:0;transform:translateY(8px);transition:all .28s;z-index:999;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:88vw}
 #toast.show{opacity:1;transform:none}
@@ -118,7 +133,38 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
     <img id="logoBar" alt="Grupo Maroni" style="height:30px;display:block">
     <span class="app-bar-title">Captura Facial</span>
   </div>
-  <button class="gear" id="gearBtn" onclick="abrirConfig()" title="Configurações">⚙️</button>
+  <div style="display:flex;align-items:center;gap:6px">
+    <button class="gear hidden" id="gearBtn" onclick="abrirConfig()" title="Configurações">⚙️</button>
+    <div class="user-chip hidden" id="userChip" onclick="sair()" title="Sair">
+      <div class="av" id="userAv"></div><span id="userNomeBar"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TELA DE LOGIN ============ -->
+<div id="loginScreen" class="login-wrap hidden">
+  <div class="login-card">
+    <div class="login-head">
+      <img id="logoLogin" alt="Grupo Maroni" style="height:46px;display:block;flex-shrink:0">
+      <div>
+        <div style="font-size:.68rem;font-weight:700;letter-spacing:.14em;color:#f5c800;text-transform:uppercase;margin-bottom:3px">Grupo Maroni</div>
+        <div style="font-size:1rem;font-weight:800;color:#fff;line-height:1.2">Captura Facial</div>
+        <div style="font-size:.72rem;color:rgba(255,255,255,.45);margin-top:3px;font-weight:500">Facilities · Controle de Acesso</div>
+      </div>
+    </div>
+    <div class="login-body">
+      <div id="loginLista">
+        <p class="login-lbl">Selecione seu usuário</p>
+        <div id="loginUsuarios"></div>
+      </div>
+      <div id="loginSenhaBox" class="hidden">
+        <p class="login-lbl">Senha de <span id="loginNomeSel" style="color:#111827"></span></p>
+        <input type="password" id="loginSenha" placeholder="Senha" autocomplete="current-password">
+        <button class="btn btn-yellow btn-block" onclick="confirmarLogin()">Entrar</button>
+        <button class="btn btn-outline btn-block" style="margin-top:8px" onclick="voltarLogin()">← Voltar</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="wrap">
@@ -154,10 +200,10 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
     <div id="baseStatus" class="base-status"></div>
     <div class="base-btns">
       <button class="btn btn-outline btn-sm" onclick="carregarBaseDoSharePoint(true)">🔄 Atualizar base</button>
-      <label class="btn btn-outline btn-sm file-btn">➕ Importar novos ativos (CSV)
+      <label class="btn btn-outline btn-sm file-btn hidden" id="btnImpAtivos">➕ Importar novos ativos (CSV)
         <input type="file" accept=".csv,text/csv" onchange="importarBase(this)" hidden>
       </label>
-      <label class="btn btn-outline btn-sm file-btn">🚫 Importar desligados (CSV)
+      <label class="btn btn-outline btn-sm file-btn hidden" id="btnImpDesl">🚫 Importar desligados (CSV)
         <input type="file" accept=".csv,text/csv" onchange="importarDesligados(this)" hidden>
       </label>
     </div>
@@ -255,10 +301,32 @@ const DEFAULT_CFG = {
   grupos:       'Administrativo'   // grupos do InControl, separados por vírgula
 };
 
+/* USUÁRIOS DO APP (fixos — para alterar, editar aqui e republicar).
+   Níveis: 'admin' = tudo (⚙️ + importar + capturar)
+           'gestor' = importar ativos/desligados + capturar
+           'operador' = só capturar (e consultar a base). */
+const USUARIOS = [
+  { nome: 'Willian',  senha: 'TROCAR-willian',  nivel: 'admin' },
+  { nome: 'Jeferson', senha: 'TROCAR-jeferson', nivel: 'operador' },
+];
+const NIVEL_LABEL = { admin: 'Administrador', gestor: 'Gestor · Facilities', operador: 'Operador' };
+
 const K_CFG   = 'facial_config_v1';
 const K_HIST  = 'facial_hist_v1';
 const K_BASE  = 'facial_base_v1';   // { matricula: nome } dos ativos (puxada do SharePoint)
 const K_GRUPO = 'facial_grupo_v1';  // último grupo usado (pré-seleção)
+const K_USER  = 'facial_user_v1';   // sessão do usuário logado neste aparelho
+
+const usuarioAtual = () => JSON.parse(localStorage.getItem(K_USER) || 'null');
+// central de permissões por nível
+function pode(acao){
+  const n = (usuarioAtual() || {}).nivel || '';
+  if(n === 'admin') return true;
+  if(acao === 'capturar')  return n === 'gestor' || n === 'operador';
+  if(acao === 'importar')  return n === 'gestor';
+  if(acao === 'config')    return false;   // só admin
+  return false;
+}
 function cfg(){
   const s = JSON.parse(localStorage.getItem(K_CFG) || '{}');
   const o = { ...DEFAULT_CFG };
@@ -392,6 +460,7 @@ async function importarBase(input){
   const file = input.files && input.files[0];
   input.value = '';                                     // permite reimportar o mesmo arquivo
   if(!file) return;
+  if(!pode('importar')){ toast('🔒 Seu nível de acesso não permite importar bases.'); return; }
   if(!cfg().baseEndpoint){ toast('⚠️ Configure a URL do fluxo da base em ⚙️ antes de importar.'); return; }
   try{
     const linhas = parseCsv(await file.text());
@@ -448,6 +517,7 @@ async function importarDesligados(input){
   const file = input.files && input.files[0];
   input.value = '';
   if(!file) return;
+  if(!pode('importar')){ toast('🔒 Seu nível de acesso não permite importar bases.'); return; }
   if(!cfg().baseEndpoint){ toast('⚠️ Configure a URL do fluxo da base em ⚙️ antes de importar.'); return; }
   try{
     const linhas = parseCsv(await file.text());
@@ -526,6 +596,60 @@ function atualizarLookup(){
   else { el.textContent = ''; el.className = 'nome-lookup'; }   // sem_base/vazio: não polui
 }
 
+/* ==================== login / permissões ==================== */
+const iniciais = n => n.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCase();
+let loginSelecionado = null;
+
+function mostrarLogin(){
+  document.getElementById('loginUsuarios').innerHTML = USUARIOS.map((u,i) => `
+    <div class="g-item" onclick="escolherUsuario(${i})">
+      <div class="g-av">${iniciais(u.nome)}</div>
+      <div><div class="g-nome">${esc(u.nome)}</div><div class="g-sub">${NIVEL_LABEL[u.nivel] || u.nivel}</div></div>
+    </div>`).join('');
+  document.getElementById('loginLista').classList.remove('hidden');
+  document.getElementById('loginSenhaBox').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+function escolherUsuario(i){
+  loginSelecionado = USUARIOS[i];
+  document.getElementById('loginNomeSel').textContent = loginSelecionado.nome;
+  document.getElementById('loginLista').classList.add('hidden');
+  document.getElementById('loginSenhaBox').classList.remove('hidden');
+  const inp = document.getElementById('loginSenha'); inp.value = ''; inp.focus();
+}
+function voltarLogin(){ loginSelecionado = null; mostrarLogin(); }
+function confirmarLogin(){
+  if(!loginSelecionado) return;
+  const senha = document.getElementById('loginSenha').value;
+  if(senha !== loginSelecionado.senha){ toast('❌ Senha incorreta.'); return; }
+  localStorage.setItem(K_USER, JSON.stringify({ nome: loginSelecionado.nome, nivel: loginSelecionado.nivel }));
+  document.getElementById('loginScreen').classList.add('hidden');
+  loginSelecionado = null;
+  aplicarPermissoes();
+  toast(`👋 Bem-vindo, ${usuarioAtual().nome}!`);
+}
+function sair(){
+  const u = usuarioAtual();
+  if(!confirm(`Sair do usuário ${u ? u.nome : ''}?`)) return;
+  localStorage.removeItem(K_USER);
+  aplicarPermissoes();
+  mostrarLogin();
+}
+
+// mostra/esconde recursos conforme o nível do usuário logado
+function aplicarPermissoes(){
+  const u = usuarioAtual();
+  document.getElementById('gearBtn').classList.toggle('hidden', !(u && pode('config')));
+  document.getElementById('userChip').classList.toggle('hidden', !u);
+  if(u){
+    document.getElementById('userAv').textContent = iniciais(u.nome);
+    document.getElementById('userNomeBar').textContent = u.nome.split(' ')[0];
+  }
+  const podeImportar = !!u && pode('importar');
+  document.getElementById('btnImpAtivos').classList.toggle('hidden', !podeImportar);
+  document.getElementById('btnImpDesl').classList.toggle('hidden', !podeImportar);
+}
+
 /* ==================== ambiente Teams ==================== */
 // Detecta se o app roda dentro do Microsoft Teams e em qual cliente.
 // No navegador comum, o initialize() não resolve → timeout → modo navegador.
@@ -580,6 +704,7 @@ function capturarTeamsMobile(){
 
 /* ==================== câmera ==================== */
 async function abrirCamera(){
+  if(!usuarioAtual()){ mostrarLogin(); return; }
   const matricula = normalizaMatricula(document.getElementById('matricula').value);
   document.getElementById('matricula').value = matricula;     // reflete a limpeza na tela
   if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
@@ -738,16 +863,20 @@ async function confirmarEnvio(){
   if(!grupo){ toast('❌ Grupo ausente. Refaça a captura.'); return; }
   document.getElementById('prevScreen').classList.add('hidden');
 
+  const u = usuarioAtual() || { nome: '?' };
+  const agora = new Date();
   const payload = {
     matricula,
     grupo,
-    timestamp: new Date().toISOString(),
+    operador : u.nome,
+    observacoes: `Capturado por ${u.nome} em ${pad(agora.getDate())}/${pad(agora.getMonth()+1)}/${agora.getFullYear()} ${pad(agora.getHours())}:${pad(agora.getMinutes())}`,
+    timestamp: agora.toISOString(),
     arquivo  : `${matricula}_${stampArquivo()}.jpg`,
     foto     : fotoAtual.dataUrl.split(',')[1]   // base64 puro, sem prefixo
   };
 
   const rec = {
-    id: Date.now(), matricula, grupo,
+    id: Date.now(), matricula, grupo, operador: u.nome,
     ts: payload.timestamp, status: 'enviando',
     thumb: fotoAtual.thumb, kb: +(fotoAtual.bytes/1024).toFixed(1),
     link: '', erroMsg: '', payload
@@ -832,7 +961,7 @@ function renderHist(){
       <img class="hist-thumb" src="${r.thumb||''}" alt="">
       <div class="hist-info">
         <div class="hist-nome">Matrícula ${esc(r.matricula)}</div>
-        <div class="hist-meta">${horaBr(r.ts)}${r.grupo ? ' • ' + esc(r.grupo) : ''}${detalhe}</div>
+        <div class="hist-meta">${horaBr(r.ts)}${r.grupo ? ' • ' + esc(r.grupo) : ''}${r.operador ? ' • por ' + esc(r.operador) : ''}${detalhe}</div>
         ${chip}
       </div>
       <div class="hist-actions">${acoes}</div>
@@ -856,6 +985,7 @@ function abrirExcel(){
 
 /* ==================== config ==================== */
 function abrirConfig(){
+  if(!pode('config')){ toast('🔒 Somente o ADMINISTRADOR acessa as configurações.'); return; }
   document.getElementById('cfgEndpoint').value = cfg().endpoint || '';
   document.getElementById('cfgBase').value = cfg().baseEndpoint || '';
   document.getElementById('cfgGrupos').value = cfg().grupos || '';
@@ -910,6 +1040,8 @@ async function testarConexao(){
       body: JSON.stringify({
         matricula:'00000',
         grupo:'TESTE',
+        operador:'TESTE',
+        observacoes:'Teste de conexão do app',
         timestamp:new Date().toISOString(),
         arquivo:`00000_${stampArquivo()}.jpg`,
         foto: teste.dataUrl.split(',')[1]
@@ -959,16 +1091,22 @@ async function testarConexao(){
   });
 })();
 
-// pinta os logos do Grupo Maroni (barra, header de marca e rodapé)
-['logoBar','logoBrand','logoFoot'].forEach(id => { const el = document.getElementById(id); if(el) el.src = _LOGO_SRC; });
+// pinta os logos do Grupo Maroni (barra, header de marca, rodapé e login)
+['logoBar','logoBrand','logoFoot','logoLogin'].forEach(id => { const el = document.getElementById(id); if(el) el.src = _LOGO_SRC; });
+
+// Enter no campo de senha = Entrar
+document.getElementById('loginSenha').addEventListener('keydown', e => { if(e.key === 'Enter') confirmarLogin(); });
 
 // detecta o ambiente (Teams desktop/web/mobile ou navegador) já no carregamento
 teamsReady = detectarTeams();
 
-renderHist(); aplicarCfg(); renderBaseStatus(); popularGrupos();
+renderHist(); aplicarCfg(); renderBaseStatus(); popularGrupos(); aplicarPermissoes();
+// exige login se não houver sessão neste aparelho
+if(!usuarioAtual()) mostrarLogin();
 // puxa a base de ativos do SharePoint ao abrir (se a URL da base estiver configurada)
 if(cfg().baseEndpoint) carregarBaseDoSharePoint(false);
-if(!cfg().endpoint) setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure as URLs em ⚙️.', 5000), 600);
+if(!cfg().endpoint && usuarioAtual() && pode('config'))
+  setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure as URLs.', 5000), 600);
 </script>
 </body>
 </html>
