@@ -188,19 +188,35 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
 
   <div class="card">
     <div class="card-title">Nova captura</div>
-    <label>Matrícula do colaborador *</label>
-    <input id="matricula" class="input-matricula" inputmode="numeric" placeholder="0000" autocomplete="off">
-    <div id="nomeLookup" class="nome-lookup"></div>
+    <label>Tipo de cadastro *</label>
+    <select id="tipo" onchange="mudarTipo()">
+      <option value="colaborador">Colaborador (por matrícula)</option>
+      <option value="terceiros">Terceiros (nome + CPF)</option>
+      <option value="aprendiz">Aprendiz (nome + CPF)</option>
+    </select>
+
+    <div id="blocoMatricula">
+      <label>Matrícula do colaborador *</label>
+      <input id="matricula" class="input-matricula" inputmode="numeric" placeholder="0000" autocomplete="off">
+      <div id="nomeLookup" class="nome-lookup"></div>
+    </div>
+
+    <div id="blocoTerceiros" class="hidden">
+      <label>Nome completo *</label>
+      <input id="tNome" placeholder="Nome completo da pessoa" autocomplete="off">
+      <label>CPF *</label>
+      <input id="tCpf" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off">
+    </div>
+
     <label>Grupo de acesso no InControl *</label>
     <select id="grupo"></select>
     <div id="grupoDisp" class="grupo-disp"></div>
     <button class="btn btn-yellow btn-block" onclick="abrirCamera()">📷 Capturar foto</button>
     <div class="dicas">
-      <b>Confira a matrícula com atenção</b> — o nome aparece aqui pela base do RH.<br><br>
-      <b>Padrão automático da foto:</b> 3x4 digital (354×472 px), JPG, no máximo <b>40 KB</b> —
-      o app ajusta sozinho antes de enviar.<br><br>
-      <b>Na hora de fotografar:</b> fundo claro e uniforme • rosto centralizado no oval •
-      boa iluminação • sem boné, óculos escuros ou máscara.
+      <b>Colaborador:</b> confira a matrícula — o nome vem da base do RH.<br>
+      <b>Terceiros/Aprendiz:</b> digite nome e CPF (o CPF vira o identificador e o nome do arquivo da foto).<br><br>
+      <b>Foto:</b> 3x4 digital (354×472 px), JPG, ≤ 40 KB — o app ajusta sozinho.
+      Fundo claro • rosto no oval • sem boné/óculos.
     </div>
   </div>
 
@@ -254,7 +270,7 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
 <!-- ============ TELA DE PREVIEW ============ -->
 <div id="prevScreen" class="cam hidden">
   <img id="prevImg" alt="Prévia da foto">
-  <div class="prev-matricula"><small>MATRÍCULA</small><span id="prevMatricula"></span></div>
+  <div class="prev-matricula"><small id="prevMatLabel">MATRÍCULA</small><span id="prevMatricula"></span></div>
   <div id="prevNome" style="color:#fff;font-weight:700;font-size:1rem;text-align:center;margin-top:4px"></div>
   <div id="prevGrupo" style="color:#f5c800;font-weight:600;font-size:.82rem;text-align:center;margin-top:4px"></div>
   <div class="badge-tamanho" id="prevTamanho"></div>
@@ -409,6 +425,7 @@ let stream = null, camFacing = 'environment', fotoAtual = null;
 let matriculaCapturada = '';                  // matrícula congelada na abertura da câmera
 let nomeCapturado = '';                       // nome (da base) congelado na abertura da câmera
 let grupoCapturado = '';                      // grupo do InControl congelado na abertura da câmera
+let tipoCapturado = '';                       // '' (colaborador) | 'Terceiro' | 'Aprendiz'
 let teamsInfo = { dentro:false, mobile:false, host:'browser' };  // ambiente detectado
 let teamsReady = null;                        // Promise da detecção do Teams
 let camGen = 0;                               // geração da câmera — invalida getUserMedia em voo
@@ -865,36 +882,82 @@ function capturarTeamsMobile(){
 }
 
 /* ==================== câmera ==================== */
+// alterna os campos conforme o tipo (Colaborador = matrícula; Terceiros/Aprendiz = nome + CPF)
+function mudarTipo(){
+  const ter = document.getElementById('tipo').value !== 'colaborador';
+  document.getElementById('blocoMatricula').classList.toggle('hidden', ter);
+  document.getElementById('blocoTerceiros').classList.toggle('hidden', !ter);
+}
+function formatCpf(d){
+  d = (d || '').replace(/\D/g,'').slice(0,11);
+  let o = d;
+  if(d.length > 9) o = d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9);
+  else if(d.length > 6) o = d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6);
+  else if(d.length > 3) o = d.slice(0,3)+'.'+d.slice(3);
+  return o;
+}
+// adiciona um terceiro/aprendiz (CPF → nome) na Base Ativos, p/ o PROCV do InControl achar o nome
+async function garantirNaBase(cpf, nome){
+  if(base()[cpf] != null) return true;              // já está na base local
+  if(!cfg().baseEndpoint){ toast('⚠️ Configure a URL do fluxo da base em ⚙️.'); return false; }
+  try{
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao:'adicionar', ativos:[{ matricula:cpf, nome }] })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const b = base(); b[cpf] = nome; localStorage.setItem(K_BASE, JSON.stringify(b));   // reflete no cache local
+    return true;
+  }catch(e){ toast('❌ Falha ao registrar na base: ' + e.message, 4500); return false; }
+}
+
 async function abrirCamera(){
   if(!usuarioAtual()){ mostrarLogin(); return; }
-  const matricula = normalizaMatricula(document.getElementById('matricula').value);
-  document.getElementById('matricula').value = matricula;     // reflete a limpeza na tela
-  if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
+  const tipo = document.getElementById('tipo').value;
   const grupoSel = document.getElementById('grupo').value;
   if(!grupoSel){ toast('⚠️ Selecione o GRUPO de acesso do InControl antes de fotografar.'); document.getElementById('grupo').focus(); return; }
   if(!cfg().endpoint){ toast('⚠️ Configure a URL do fluxo em ⚙️ antes de começar.'); abrirConfig(); return; }
 
-  // confere a matrícula na base de ativos (puxada do SharePoint) antes de capturar
-  const r = lookupMatricula(matricula);
-  if(r.status === 'sem_base'){
-    if(!confirm('A base de ativos ainda não foi carregada, então não dá para conferir a matrícula.\nToque em "Atualizar base". Deseja capturar mesmo assim?')) return;
-  } else if(r.status === 'nao_encontrado'){
-    if(!confirm(`⚠️ A matrícula ${matricula} NÃO está na base de ativos.\nConfira se digitou certo (ou atualize a base). Capturar mesmo assim?`)) return;
+  let identificador, nomeConf, tipoLabel = '';
+
+  if(tipo === 'colaborador'){
+    const matricula = normalizaMatricula(document.getElementById('matricula').value);
+    document.getElementById('matricula').value = matricula;
+    if(!matricula){ toast('⚠️ Informe a matrícula antes de fotografar.'); return; }
+    const r = lookupMatricula(matricula);
+    if(r.status === 'sem_base'){
+      if(!confirm('A base de ativos ainda não foi carregada, então não dá para conferir a matrícula.\nToque em "Atualizar base". Deseja capturar mesmo assim?')) return;
+    } else if(r.status === 'nao_encontrado'){
+      if(!confirm(`⚠️ A matrícula ${matricula} NÃO está na base de ativos.\nConfira se digitou certo (ou atualize a base). Capturar mesmo assim?`)) return;
+    }
+    identificador = matricula; nomeConf = r.nome || '';
+  } else {
+    // Terceiros / Aprendiz — nome + CPF digitados
+    const nome = document.getElementById('tNome').value.trim();
+    const cpf = (document.getElementById('tCpf').value || '').replace(/\D/g,'');
+    document.getElementById('tCpf').value = formatCpf(cpf);
+    if(!nome){ toast('⚠️ Informe o nome completo.'); document.getElementById('tNome').focus(); return; }
+    if(cpf.length !== 11){ toast('⚠️ CPF inválido — precisa ter 11 dígitos.'); document.getElementById('tCpf').focus(); return; }
+    tipoLabel = (tipo === 'aprendiz') ? 'Aprendiz' : 'Terceiro';
+    // registra na Base Ativos (pelo CPF) para o nome aparecer no InControl
+    toast('⏳ Registrando ' + tipoLabel.toLowerCase() + ' na base...');
+    if(!await garantirNaBase(cpf, nome)) return;    // se não conseguiu, não captura (nome não resolveria)
+    identificador = cpf; nomeConf = nome;
   }
-  const nomeConf = r.nome || '';
 
-  const jaEnviado = hist().find(h => h.matricula === matricula && h.status === 'enviado');
-  if(jaEnviado && !confirm(`Já existe foto enviada para a matrícula ${matricula} (em ${horaBr(jaEnviado.ts)}).\nUma nova captura vai substituir a linha na planilha. Continuar?`)) return;
+  const jaEnviado = hist().find(h => h.matricula === identificador && h.status === 'enviado');
+  if(jaEnviado && !confirm(`Já existe foto enviada para ${identificador} (em ${horaBr(jaEnviado.ts)}).\nUma nova captura vai substituir a linha na planilha. Continuar?`)) return;
 
-  matriculaCapturada = matricula;                             // congela — não relê o input depois
-  nomeCapturado = nomeConf;                                   // nome congelado da base
-  grupoCapturado = grupoSel;                                  // grupo congelado do seletor
+  matriculaCapturada = identificador;                         // matrícula OU CPF (congelado)
+  nomeCapturado = nomeConf;
+  grupoCapturado = grupoSel;
+  tipoCapturado = tipoLabel;                                  // '' p/ colaborador; 'Terceiro'/'Aprendiz'
 
   // No Teams MOBILE o getUserMedia é bloqueado → usa a câmera nativa via SDK do Teams
   await (teamsReady || Promise.resolve());
   if(teamsInfo.mobile){ await capturarTeamsMobile(); return; }
 
-  document.getElementById('camMatricula').textContent = matricula + (nomeConf ? ' — ' + nomeConf.split(' ')[0] : '');
+  document.getElementById('camMatricula').textContent = (tipoLabel ? tipoLabel + ' ' : '') + identificador + (nomeConf ? ' — ' + nomeConf.split(' ')[0] : '');
   document.getElementById('camScreen').classList.remove('hidden');
   await ligarStream();
 }
@@ -993,14 +1056,16 @@ function exibirPreview(foto){
   foto.matricula = matriculaCapturada;
   foto.nome = nomeCapturado;
   foto.grupo = grupoCapturado;
+  foto.tipo = tipoCapturado;
   fotoAtual = foto;
   document.getElementById('prevImg').src = foto.dataUrl;
+  document.getElementById('prevMatLabel').textContent = foto.tipo ? foto.tipo.toUpperCase() + ' · CPF' : 'MATRÍCULA';
   document.getElementById('prevMatricula').textContent = foto.matricula;
   document.getElementById('prevNome').textContent = foto.nome || '';
   document.getElementById('prevGrupo').textContent = foto.grupo ? '🔑 Grupo: ' + foto.grupo : '';
   document.getElementById('prevTamanho').textContent =
     `✔ 3x4 digital ${foto.w}×${foto.h} px • ${(foto.bytes/1024).toFixed(1)} KB (limite ${LIMITE_KB} KB)`;
-  document.getElementById('btnConfirmar').textContent = `✅ Enviar matrícula ${foto.matricula}`;
+  document.getElementById('btnConfirmar').textContent = foto.tipo ? `✅ Enviar ${foto.tipo}` : `✅ Enviar matrícula ${foto.matricula}`;
   document.getElementById('prevScreen').classList.remove('hidden');
 }
 
@@ -1026,19 +1091,21 @@ async function confirmarEnvio(){
   document.getElementById('prevScreen').classList.add('hidden');
 
   const u = usuarioAtual() || { nome: '?' };
+  const tipo = fotoAtual.tipo || '';   // '' colaborador | 'Terceiro' | 'Aprendiz'
   const agora = new Date();
+  const carimbo = `${pad(agora.getDate())}/${pad(agora.getMonth()+1)}/${agora.getFullYear()} ${pad(agora.getHours())}:${pad(agora.getMinutes())}`;
   const payload = {
     matricula,
     grupo,
     operador : u.nome,
-    observacoes: `Capturado por ${u.nome} em ${pad(agora.getDate())}/${pad(agora.getMonth()+1)}/${agora.getFullYear()} ${pad(agora.getHours())}:${pad(agora.getMinutes())}`,
+    observacoes: (tipo ? tipo + ' • ' : '') + `Capturado por ${u.nome} em ${carimbo}`,
     timestamp: agora.toISOString(),
     arquivo  : `${matricula}_${stampArquivo()}.jpg`,
     foto     : fotoAtual.dataUrl.split(',')[1]   // base64 puro, sem prefixo
   };
 
   const rec = {
-    id: Date.now(), matricula, grupo, operador: u.nome,
+    id: Date.now(), matricula, grupo, operador: u.nome, tipo,
     ts: payload.timestamp, status: 'enviando',
     thumb: fotoAtual.thumb, kb: +(fotoAtual.bytes/1024).toFixed(1),
     link: '', erroMsg: '', payload
@@ -1097,8 +1164,12 @@ async function enviar(id, recInline){
 
 function limparForm(){
   document.getElementById('matricula').value = '';
+  document.getElementById('tNome').value = '';
+  document.getElementById('tCpf').value = '';
   atualizarLookup();
-  document.getElementById('matricula').focus();
+  const t = document.getElementById('tipo').value;
+  if(t === 'colaborador') document.getElementById('matricula').focus();
+  else document.getElementById('tNome').focus();
 }
 
 /* ==================== histórico ==================== */
@@ -1122,7 +1193,7 @@ function renderHist(){
     return `<div class="hist-item">
       <img class="hist-thumb" src="${r.thumb||''}" alt="">
       <div class="hist-info">
-        <div class="hist-nome">Matrícula ${esc(r.matricula)}</div>
+        <div class="hist-nome">${r.tipo ? esc(r.tipo) + ' (CPF) ' : 'Matrícula '}${esc(r.matricula)}</div>
         <div class="hist-meta">${horaBr(r.ts)}${r.grupo ? ' • ' + esc(r.grupo) : ''}${r.operador ? ' • por ' + esc(r.operador) : ''}${detalhe}</div>
         ${chip}
       </div>
@@ -1252,6 +1323,16 @@ async function testarConexao(){
     atualizarLookup();
   });
 })();
+
+// máscara de CPF em tempo real (Terceiros / Aprendiz): 000.000.000-00
+(function(){
+  const inp = document.getElementById('tCpf');
+  inp.addEventListener('input', () => {
+    const d = inp.value.replace(/\D/g,'').slice(0,11);
+    inp.value = formatCpf(d);
+  });
+})();
+mudarTipo();   // deixa os campos certos visíveis já na abertura
 
 // pinta os logos do Grupo Maroni (barra, header de marca, rodapé e login)
 ['logoBar','logoBrand','logoFoot','logoLogin'].forEach(id => { const el = document.getElementById(id); if(el) el.src = _LOGO_SRC; });
