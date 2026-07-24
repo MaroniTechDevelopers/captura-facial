@@ -110,6 +110,12 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
 .grp-nome{font-size:.86rem;font-weight:700;color:#111827}
 .grp-devs{font-size:.72rem;color:#6b7280;margin-top:2px;word-break:break-word}
 .grp-acoes{display:flex;gap:6px;flex-shrink:0}
+.usr-telas{display:flex;flex-wrap:wrap;gap:6px 14px;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:10px;margin-top:4px}
+.usr-telas label{display:flex;align-items:center;gap:7px;font-size:.78rem;font-weight:600;color:#374151;cursor:pointer;margin:0}
+.usr-telas input{width:15px;height:15px;flex-shrink:0;accent-color:#111827}
+.usr-senha-row{display:flex;gap:8px;margin-top:10px}
+.usr-senha-row input{flex:1;min-width:0;margin:0}
+.usr-badge{display:inline-block;font-size:.62rem;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:20px;color:#fff;vertical-align:middle;margin-left:4px}
 
 /* ---------- login (mesmo visual do app de Treinamentos G&D) ---------- */
 .login-wrap{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(145deg,#f0f2f5 0%,#e8eaed 100%)}
@@ -142,6 +148,8 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
     <span class="app-bar-title">Captura Facial</span>
   </div>
   <div style="display:flex;align-items:center;gap:6px">
+    <button class="gear hidden" id="usersBtn" onclick="abrirUsuarios()" title="Usuários">👥</button>
+    <button class="gear hidden" id="gruposBtn" onclick="abrirGrupos()" title="Grupos de acesso">🔑</button>
     <button class="gear hidden" id="gearBtn" onclick="abrirConfig()" title="Configurações">⚙️</button>
     <div class="user-chip hidden" id="userChip" onclick="sair()" title="Sair">
       <div class="av" id="userAv"></div><span id="userNomeBar"></span>
@@ -186,7 +194,7 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="cardCaptura">
     <div class="card-title">Nova captura</div>
     <label>Tipo de cadastro *</label>
     <select id="tipo" onchange="mudarTipo()">
@@ -328,6 +336,38 @@ select.sem-grupo{border-color:#f5c800;background:#fffbe6}
   </div>
 </div>
 
+<!-- ============ MODAL USUÁRIOS (Admin) ============ -->
+<div id="modalUsuarios" class="modal-bg hidden">
+  <div class="modal">
+    <h3>👥 Usuários do app</h3>
+    <p class="sub">Cadastro central no SharePoint — vale para todos os aparelhos. Cada usuário tem um
+    <b>nível</b> (que já define um conjunto de telas) e você pode <b>personalizar as telas</b> que ele enxerga.
+    As senhas são guardadas com <b>hash</b> (nunca em texto).</p>
+    <div id="usrLista" style="margin-top:14px"></div>
+
+    <label id="usrFormTitulo" style="margin-top:6px">Novo usuário</label>
+    <input id="usrNome"  placeholder="Nome completo" autocomplete="off">
+    <input id="usrLogin" placeholder="login de acesso (sem espaços)" autocomplete="off" style="margin-top:8px">
+    <label style="margin-top:10px">Nível</label>
+    <select id="usrNivel" onchange="marcarTelasDoNivel()">
+      <option value="operador">Operador (só capturar)</option>
+      <option value="gestor">Gestor · Facilities (capturar + importar)</option>
+      <option value="admin">Administrador (tudo)</option>
+    </select>
+    <label style="margin-top:10px">Telas que este usuário acessa</label>
+    <div id="usrTelas" class="usr-telas"></div>
+    <div class="usr-senha-row">
+      <input id="usrSenha"  type="password" placeholder="Senha" autocomplete="new-password">
+      <input id="usrSenha2" type="password" placeholder="Confirmar senha" autocomplete="new-password">
+    </div>
+    <div id="usrHint" class="dicas" style="margin-top:6px">Ao <b>editar</b>, deixe a senha em branco para mantê-la.</div>
+    <div class="m-foot">
+      <button class="btn btn-dark btn-sm" id="usrSalvarBtn" onclick="salvarUsuario()">➕ Adicionar usuário</button>
+      <button class="btn btn-outline btn-sm" onclick="fecharUsuarios()">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <canvas id="workCanvas" class="hidden"></canvas>
 <div id="toast"></div>
 
@@ -347,15 +387,33 @@ const DEFAULT_CFG = {
   grupos:       'Administrativo'   // grupos do InControl, separados por vírgula
 };
 
-/* USUÁRIOS DO APP (fixos — para alterar, editar aqui e republicar).
-   Níveis: 'admin' = tudo (⚙️ + importar + capturar)
-           'gestor' = importar ativos/desligados + capturar
-           'operador' = só capturar (e consultar a base). */
-const USUARIOS = [
-  { nome: 'Willian',  senha: 'TROCAR-willian',  nivel: 'admin' },
-  { nome: 'Jeferson', senha: 'TROCAR-jeferson', nivel: 'operador' },
+/* ==================== USUÁRIOS & PERMISSÕES ====================
+   Os usuários ficam na planilha central do SharePoint (tabela "Usuarios"),
+   gerenciados pela aba 👥 (só admin) através do fluxo "Base — App".
+   SEED_USERS abaixo é só o ACESSO DE EMERGÊNCIA (bootstrap): aparece na tela de
+   login enquanto a base central ainda estiver vazia/indisponível. Troque as
+   senhas e, assim que der, cadastre os usuários reais pela aba 👥 (com hash). */
+const SEED_USERS = [
+  { login: 'willian',  nome: 'Willian',  nivel: 'admin',    senha: 'TROCAR-willian'  },
+  { login: 'jeferson', nome: 'Jeferson', nivel: 'operador', senha: 'TROCAR-jeferson' },
 ];
+const AUTH_SALT = 'maroni-facial-2026';   // sal do hash das senhas (só mude se for recadastrar todos)
 const NIVEL_LABEL = { admin: 'Administrador', gestor: 'Gestor · Facilities', operador: 'Operador' };
+
+// Telas/áreas do app que podem ser liberadas por usuário
+const TELAS = [
+  { key: 'capturar', icon: '📷', label: 'Capturar foto' },
+  { key: 'importar', icon: '📥', label: 'Importar bases (ativos/desligados)' },
+  { key: 'grupos',   icon: '🔑', label: 'Gerenciar grupos' },
+  { key: 'config',   icon: '⚙️', label: 'Configurações (URLs)' },
+  { key: 'usuarios', icon: '👤', label: 'Gerenciar usuários' },
+];
+// Conjunto PADRÃO de telas por nível (a personalização por usuário sobrepõe)
+const NIVEL_TELAS = {
+  admin:    ['capturar','importar','grupos','config','usuarios'],
+  gestor:   ['capturar','importar'],
+  operador: ['capturar'],
+};
 
 const K_CFG   = 'facial_config_v1';
 const K_HIST  = 'facial_hist_v1';
@@ -363,6 +421,7 @@ const K_BASE  = 'facial_base_v1';   // { matricula: nome } dos ativos (puxada do
 const K_GRUPO  = 'facial_grupo_v1';   // último grupo usado (pré-seleção)
 const K_GRUPOS = 'facial_grupos_v1';  // [{grupo, dispositivos}] — cadastro central (SharePoint)
 const K_USER   = 'facial_user_v1';    // sessão do usuário logado neste aparelho
+const K_USERS  = 'facial_users_v1';   // [{login,nome,senhaHash,nivel,telas}] — cadastro central (SharePoint)
 const gruposCentrais = () => JSON.parse(localStorage.getItem(K_GRUPOS) || '[]');
 // lista efetiva de grupos: o cadastro central; se vazio, cai para o texto do ⚙️ (grupos separados por vírgula)
 function listaGrupos(){
@@ -373,14 +432,30 @@ function listaGrupos(){
 }
 
 const usuarioAtual = () => JSON.parse(localStorage.getItem(K_USER) || 'null');
-// central de permissões por nível
-function pode(acao){
-  const n = (usuarioAtual() || {}).nivel || '';
-  if(n === 'admin') return true;
-  if(acao === 'capturar')  return n === 'gestor' || n === 'operador';
-  if(acao === 'importar')  return n === 'gestor';
-  if(acao === 'config')    return false;   // só admin
-  return false;
+const usuariosCentrais = () => { try { return JSON.parse(localStorage.getItem(K_USERS) || 'null'); } catch { return null; } };
+// lista efetiva de usuários p/ login: o cadastro central + o acesso de emergência (SEED) que ainda não exista lá
+function listaUsuarios(){
+  const c = usuariosCentrais() || [];
+  const logins = new Set(c.map(u => (u.login || '').toLowerCase()));
+  const extra = SEED_USERS.filter(s => !logins.has(s.login));
+  return c.length ? [...c, ...extra] : [...SEED_USERS];
+}
+// telas efetivas de um usuário (personalizadas, se houver; senão o padrão do nível)
+function telasDoUsuario(u){
+  u = u || usuarioAtual();
+  if(!u) return [];
+  if(Array.isArray(u.telas) && u.telas.length) return u.telas;
+  return NIVEL_TELAS[u.nivel] || [];
+}
+function pode(acao){ return telasDoUsuario().includes(acao); }
+// hash SHA-256 da senha (com sal) — nunca guardamos senha em texto puro
+async function hashSenha(s){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode((s || '') + AUTH_SALT));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+async function autentica(u, senha){
+  if(u.senhaHash) return (await hashSenha(senha)) === u.senhaHash;   // usuário central (hash)
+  return senha === (u.senha || '');                                  // acesso de emergência (texto)
 }
 function cfg(){
   const s = JSON.parse(localStorage.getItem(K_CFG) || '{}');
@@ -673,7 +748,7 @@ async function carregarGrupos(mostrar){
 let grupoEditando = null;   // nome do grupo em edição (null = criando novo)
 
 function abrirGrupos(){
-  if(!pode('config')){ toast('🔒 Somente o ADMINISTRADOR gerencia grupos.'); return; }
+  if(!pode('grupos')){ toast('🔒 Você não tem acesso ao gerenciamento de grupos.'); return; }
   grupoEditando = null;
   document.getElementById('grpNome').value = '';
   document.getElementById('grpDisp').value = '';
@@ -762,6 +837,199 @@ async function removerGrupo(i){
   }catch(e){ toast('❌ Falha ao remover grupo: ' + e.message, 4500); }
 }
 
+/* ==================== usuários (Admin) ==================== */
+// Puxa o cadastro central de usuários (tabela Usuarios) via fluxo Base (ação listarUsuarios).
+async function carregarUsuarios(mostrar){
+  const url = cfg().baseEndpoint;
+  if(!url){ if(mostrar) toast('⚠️ Configure a URL do fluxo da base em ⚙️.'); return false; }
+  try{
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'listarUsuarios' }) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const lista = Array.isArray(data) ? data : (data.usuarios || data.value || []);
+    const arr = lista.map(x => ({
+      login: String(x.login ?? x.Login ?? '').trim().toLowerCase(),
+      nome:  String(x.nome ?? x.Nome ?? '').trim(),
+      senhaHash: String(x.senhaHash ?? x.SenhaHash ?? '').trim(),
+      nivel: (String(x.nivel ?? x.Nivel ?? 'operador').trim() || 'operador'),
+      telas: String(x.telas ?? x.Telas ?? '').split(',').map(s => s.trim()).filter(Boolean),
+    })).filter(u => u.login);
+    localStorage.setItem(K_USERS, JSON.stringify(arr));   // grava até se vazio (reflete exclusões)
+    if(mostrar) toast(`✅ ${arr.length} usuário(s) carregados.`);
+    return true;
+  }catch(e){
+    if(mostrar) toast('❌ Falha ao carregar usuários: ' + e.message, 4500);
+    return false;
+  }
+}
+
+// Recarrega do SharePoint e re-sincroniza a sessão local (nível/telas) do usuário logado
+async function sincronizarUsuarios(){
+  const ok = await carregarUsuarios(false);
+  const sess = usuarioAtual();
+  if(sess){
+    const c = (usuariosCentrais() || []).find(u => (u.login || '') === (sess.login || ''));
+    if(c){
+      const telas = (Array.isArray(c.telas) && c.telas.length) ? c.telas : (NIVEL_TELAS[c.nivel] || []);
+      localStorage.setItem(K_USER, JSON.stringify({ login: c.login, nome: c.nome, nivel: c.nivel, telas }));
+      aplicarPermissoes();
+    }
+  }
+  return ok;
+}
+
+let usuarioEditando = null;   // login em edição (null = criando novo)
+
+function abrirUsuarios(){
+  if(!pode('usuarios')){ toast('🔒 Você não tem acesso ao gerenciamento de usuários.'); return; }
+  resetFormUsuario();
+  renderUsuarios();
+  document.getElementById('modalUsuarios').classList.remove('hidden');
+  carregarUsuarios(false).then(renderUsuarios);   // atualiza do SharePoint em segundo plano
+}
+function fecharUsuarios(){ document.getElementById('modalUsuarios').classList.add('hidden'); }
+
+const NIVEL_COR = { admin:'#b45309', gestor:'#047857', operador:'#2563eb' };
+
+function renderUsuarios(){
+  const el = document.getElementById('usrLista');
+  if(!el) return;
+  const lista = usuariosCentrais() || [];
+  const eu = (usuarioAtual() || {}).login || '';
+  el.innerHTML = lista.length ? lista.map(u => {
+    const eff = telasDoUsuario(u);
+    const resumo = eff.length >= TELAS.length ? 'todas as telas'
+                 : eff.map(k => (TELAS.find(t => t.key === k) || {}).icon || '').join(' ');
+    const badge = `<span class="usr-badge" style="background:${NIVEL_COR[u.nivel] || '#6b7280'}">${(NIVEL_LABEL[u.nivel] || u.nivel).split(' ')[0]}</span>`;
+    const isSelf = u.login === eu;
+    return `<div class="grp-item">
+      <div class="grp-info">
+        <div class="grp-nome">${esc(u.nome)}${badge}${isSelf ? ' <span style="font-size:.7rem;color:#6b7280">(você)</span>' : ''}</div>
+        <div class="grp-devs">👤 ${esc(u.login)} · 🖥️ ${resumo || '<i>nenhuma tela</i>'}</div>
+      </div>
+      <div class="grp-acoes">
+        <button class="btn btn-outline btn-sm" onclick="editarUsuario('${esc(u.login)}')">✏️</button>
+        ${isSelf ? '' : `<button class="btn btn-outline btn-sm" onclick="removerUsuario('${esc(u.login)}')">🗑️</button>`}
+      </div>
+    </div>`;
+  }).join('')
+    : '<div class="empty">Nenhum usuário no cadastro central ainda. Cadastre abaixo — enquanto isso, o acesso de emergência continua valendo.</div>';
+}
+
+function renderTelasChecks(selecionadas){
+  document.getElementById('usrTelas').innerHTML = TELAS.map(t => `
+    <label><input type="checkbox" value="${t.key}" ${selecionadas.includes(t.key) ? 'checked' : ''}> ${t.icon} ${esc(t.label)}</label>
+  `).join('');
+}
+function telasMarcadas(){
+  return [...document.querySelectorAll('#usrTelas input:checked')].map(i => i.value);
+}
+function marcarTelasDoNivel(){
+  const nivel = document.getElementById('usrNivel').value;
+  renderTelasChecks(NIVEL_TELAS[nivel] || []);
+}
+function mesmasTelas(a, b){ return [...a].sort().join(',') === [...b].sort().join(','); }
+
+function resetFormUsuario(){
+  usuarioEditando = null;
+  document.getElementById('usrNome').value = '';
+  document.getElementById('usrLogin').value = '';
+  document.getElementById('usrLogin').disabled = false;
+  document.getElementById('usrSenha').value = '';
+  document.getElementById('usrSenha2').value = '';
+  document.getElementById('usrNivel').value = 'operador';
+  marcarTelasDoNivel();
+  document.getElementById('usrFormTitulo').textContent = 'Novo usuário';
+  document.getElementById('usrSalvarBtn').textContent = '➕ Adicionar usuário';
+}
+
+function editarUsuario(login){
+  const u = (usuariosCentrais() || []).find(x => x.login === login);
+  if(!u) return;
+  usuarioEditando = u.login;
+  document.getElementById('usrNome').value = u.nome;
+  document.getElementById('usrLogin').value = u.login;
+  document.getElementById('usrLogin').disabled = true;   // login é a chave; renomear = remover + criar
+  document.getElementById('usrSenha').value = '';
+  document.getElementById('usrSenha2').value = '';
+  document.getElementById('usrNivel').value = u.nivel;
+  renderTelasChecks(telasDoUsuario(u));
+  document.getElementById('usrFormTitulo').textContent = 'Editando: ' + u.nome;
+  document.getElementById('usrSalvarBtn').textContent = '💾 Salvar alterações';
+  document.getElementById('modalUsuarios').scrollTop = 0;
+}
+
+async function salvarUsuario(){
+  if(!pode('usuarios')) return;
+  const nome  = document.getElementById('usrNome').value.trim();
+  const login = document.getElementById('usrLogin').value.trim().toLowerCase().replace(/\s+/g,'');
+  const nivel = document.getElementById('usrNivel').value;
+  const senha  = document.getElementById('usrSenha').value;
+  const senha2 = document.getElementById('usrSenha2').value;
+  const editando = !!usuarioEditando;
+  if(!nome || !login){ toast('Informe nome e login.'); return; }
+
+  const centrais = usuariosCentrais() || [];
+  if(!editando && centrais.some(u => u.login === login)){ toast('⚠️ Esse login já existe — use o ✏️ para editar.'); return; }
+
+  // senha: obrigatória ao criar; ao editar, em branco = mantém a atual
+  let senhaHash;
+  if(senha){
+    if(senha !== senha2){ toast('❌ As senhas não coincidem.'); return; }
+    if(senha.length < 4){ toast('❌ A senha precisa ter ao menos 4 caracteres.'); return; }
+    senhaHash = await hashSenha(senha);
+  } else if(editando){
+    senhaHash = (centrais.find(u => u.login === login) || {}).senhaHash || '';
+  } else {
+    toast('❌ Defina uma senha para o novo usuário.'); return;
+  }
+
+  // telas: se o conjunto marcado = o padrão do nível, guarda vazio (segue o nível)
+  const sel = telasMarcadas();
+  if(!sel.length){ toast('⚠️ Marque ao menos uma tela.'); return; }
+  const telasStr = mesmasTelas(sel, NIVEL_TELAS[nivel] || []) ? '' : sel.join(',');
+
+  try{
+    toast('⏳ Salvando usuário...');
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao: editando ? 'atualizarUsuario' : 'adicionarUsuario', login, nome, senhaHash, nivel, telas: telasStr })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    await carregarUsuarios(false);
+    // se editei a mim mesmo, atualiza a sessão e as permissões na hora
+    if(editando && (usuarioAtual() || {}).login === login){
+      const telas = telasStr ? sel : (NIVEL_TELAS[nivel] || []);
+      localStorage.setItem(K_USER, JSON.stringify({ login, nome, nivel, telas }));
+      aplicarPermissoes();
+    }
+    resetFormUsuario();
+    renderUsuarios();
+    toast(`✅ Usuário "${nome}" salvo na base central.`);
+  }catch(e){ toast('❌ Falha ao salvar usuário: ' + e.message, 4500); }
+}
+
+async function removerUsuario(login){
+  if(!pode('usuarios')) return;
+  if((usuarioAtual() || {}).login === login){ toast('⚠️ Você não pode remover o seu próprio usuário.'); return; }
+  const u = (usuariosCentrais() || []).find(x => x.login === login);
+  if(!u) return;
+  if(!confirm(`Remover o usuário "${u.nome}" (${u.login})?\nEle perde o acesso ao app em todos os aparelhos.`)) return;
+  try{
+    toast('⏳ Removendo...');
+    const r = await fetch(cfg().baseEndpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao:'removerUsuario', login })
+    });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    localStorage.setItem(K_USERS, JSON.stringify(centraisSem(login)));   // reflete já
+    await carregarUsuarios(false);
+    renderUsuarios();
+    toast(`✅ Usuário "${u.nome}" removido.`);
+  }catch(e){ toast('❌ Falha ao remover usuário: ' + e.message, 4500); }
+}
+function centraisSem(login){ return (usuariosCentrais() || []).filter(x => x.login !== login); }
+
 // atualiza o texto de conferência do nome enquanto digita a matrícula
 function atualizarLookup(){
   const el = document.getElementById('nomeLookup');
@@ -780,7 +1048,7 @@ const iniciais = n => n.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCas
 let loginSelecionado = null;
 
 function mostrarLogin(){
-  document.getElementById('loginUsuarios').innerHTML = USUARIOS.map((u,i) => `
+  document.getElementById('loginUsuarios').innerHTML = listaUsuarios().map((u,i) => `
     <div class="g-item" onclick="escolherUsuario(${i})">
       <div class="g-av">${iniciais(u.nome)}</div>
       <div><div class="g-nome">${esc(u.nome)}</div><div class="g-sub">${NIVEL_LABEL[u.nivel] || u.nivel}</div></div>
@@ -788,20 +1056,33 @@ function mostrarLogin(){
   document.getElementById('loginLista').classList.remove('hidden');
   document.getElementById('loginSenhaBox').classList.add('hidden');
   document.getElementById('loginScreen').classList.remove('hidden');
+  // atualiza a lista de usuários do SharePoint em segundo plano (se ainda não carregou)
+  if(cfg().baseEndpoint) carregarUsuarios(false).then(ok => { if(ok) mostrarLoginLista(); });
+}
+function mostrarLoginLista(){   // re-renderiza só a lista (se ainda estiver na etapa de escolha)
+  if(document.getElementById('loginLista').classList.contains('hidden')) return;
+  document.getElementById('loginUsuarios').innerHTML = listaUsuarios().map((u,i) => `
+    <div class="g-item" onclick="escolherUsuario(${i})">
+      <div class="g-av">${iniciais(u.nome)}</div>
+      <div><div class="g-nome">${esc(u.nome)}</div><div class="g-sub">${NIVEL_LABEL[u.nivel] || u.nivel}</div></div>
+    </div>`).join('');
 }
 function escolherUsuario(i){
-  loginSelecionado = USUARIOS[i];
+  loginSelecionado = listaUsuarios()[i];
+  if(!loginSelecionado) return;
   document.getElementById('loginNomeSel').textContent = loginSelecionado.nome;
   document.getElementById('loginLista').classList.add('hidden');
   document.getElementById('loginSenhaBox').classList.remove('hidden');
   const inp = document.getElementById('loginSenha'); inp.value = ''; inp.focus();
 }
 function voltarLogin(){ loginSelecionado = null; mostrarLogin(); }
-function confirmarLogin(){
+async function confirmarLogin(){
   if(!loginSelecionado) return;
   const senha = document.getElementById('loginSenha').value;
-  if(senha !== loginSelecionado.senha){ toast('❌ Senha incorreta.'); return; }
-  localStorage.setItem(K_USER, JSON.stringify({ nome: loginSelecionado.nome, nivel: loginSelecionado.nivel }));
+  if(!(await autentica(loginSelecionado, senha))){ toast('❌ Senha incorreta.'); return; }
+  const u = loginSelecionado;
+  const telas = (Array.isArray(u.telas) && u.telas.length) ? u.telas : (NIVEL_TELAS[u.nivel] || []);
+  localStorage.setItem(K_USER, JSON.stringify({ login: u.login, nome: u.nome, nivel: u.nivel, telas }));
   document.getElementById('loginScreen').classList.add('hidden');
   loginSelecionado = null;
   aplicarPermissoes();
@@ -815,18 +1096,22 @@ function sair(){
   mostrarLogin();
 }
 
-// mostra/esconde recursos conforme o nível do usuário logado
+// mostra/esconde recursos conforme as TELAS liberadas para o usuário logado
 function aplicarPermissoes(){
   const u = usuarioAtual();
-  document.getElementById('gearBtn').classList.toggle('hidden', !(u && pode('config')));
-  document.getElementById('userChip').classList.toggle('hidden', !u);
+  const show = (id, cond) => { const el = document.getElementById(id); if(el) el.classList.toggle('hidden', !cond); };
+  show('gearBtn',   !!u && pode('config'));
+  show('gruposBtn', !!u && pode('grupos'));
+  show('usersBtn',  !!u && pode('usuarios'));
+  show('userChip',  !!u);
   if(u){
     document.getElementById('userAv').textContent = iniciais(u.nome);
     document.getElementById('userNomeBar').textContent = u.nome.split(' ')[0];
   }
+  show('cardCaptura', !!u && pode('capturar'));
   const podeImportar = !!u && pode('importar');
-  document.getElementById('btnImpAtivos').classList.toggle('hidden', !podeImportar);
-  document.getElementById('btnImpDesl').classList.toggle('hidden', !podeImportar);
+  show('btnImpAtivos', podeImportar);
+  show('btnImpDesl',   podeImportar);
 }
 
 /* ==================== ambiente Teams ==================== */
@@ -1346,8 +1631,8 @@ teamsReady = detectarTeams();
 renderHist(); aplicarCfg(); renderBaseStatus(); popularGrupos(); aplicarPermissoes();
 // exige login se não houver sessão neste aparelho
 if(!usuarioAtual()) mostrarLogin();
-// puxa a base de ativos e o cadastro de grupos do SharePoint ao abrir
-if(cfg().baseEndpoint){ carregarBaseDoSharePoint(false); carregarGrupos(false); }
+// puxa a base de ativos, os grupos e os usuários do SharePoint ao abrir
+if(cfg().baseEndpoint){ carregarBaseDoSharePoint(false); carregarGrupos(false); sincronizarUsuarios(); }
 if(!cfg().endpoint && usuarioAtual() && pode('config'))
   setTimeout(()=>toast('👋 Primeiro acesso: toque em ⚙️ e configure as URLs.', 5000), 600);
 </script>
